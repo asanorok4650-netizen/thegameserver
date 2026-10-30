@@ -29,6 +29,14 @@ function defaultJoint(joint, P, C, h) {
   return [C.center[0], (lo + hi) / 2, 0];
 }
 
+/** MeshPartのSizeが仮の値(1,1,1)のアセットがあるため、その場合はメッシュの実寸を使う。 */
+export function effectiveSize(info) {
+  const g = info.geometry && info.geometry.bbox;
+  const placeholder = info.size.every((v) => Math.abs(v - 1) < 1e-3);
+  if (info.kind === 'meshpart' && g && placeholder) return g.max.map((v, k) => v - g.min[k]);
+  return info.size;
+}
+
 const pickInfo = (e, scales) => ((scales.bodyType || 0) >= 0.5 ? (e.artist || e.fixed) : (e.fixed || e.artist));
 
 /**
@@ -61,7 +69,7 @@ export function applyBodyParts(layout, rigType, scales, bodyParts) {
       if (!info || !info.geometry) continue;
       const hs = scales.head * scales.height;
       const f = pn === 'Head' ? [hs, hs, hs] : [scales.width, scales.height, scales.depth];
-      d.size = info.size.map((v, k) => v * f[k]);
+      d.size = effectiveSize(info).map((v, k) => v * f[k]);
       d.custom = { info, variant: e.fixed === e.artist ? 'single' : (info === e.artist ? 'artist' : 'fixed') };
       d.attachments = {};
       for (const [an, a] of Object.entries(info.attachments)) d.attachments[an] = { pos: a.pos.map((v, k) => v * f[k]), rot: a.rot };
