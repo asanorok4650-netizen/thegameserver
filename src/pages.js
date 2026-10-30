@@ -19,6 +19,16 @@ export const PAGES = {
     title: '最近プレイしたゲーム',
     subtitle: '最近開いたワールド。',
     sections: ['recent']
+  },
+  avatar: {
+    title: 'アバター',
+    subtitle: 'パーツを組み合わせてアバターを作ろう。',
+    sections: ['avatar']
+  },
+  settings: {
+    title: '設定',
+    subtitle: '接続と描画の設定。',
+    sections: ['settings']
   }
 };
 
@@ -26,5 +36,7 @@ export const NAV_ITEMS = [
   { page: 'home', icon: '⌂', label: 'ホーム' },
   { page: 'discover', icon: '◈', label: '探索' },
   { page: 'friends', icon: '♧', label: 'フレンド' },
-  { page: 'recent', icon: '◷', label: '最近プレイしたゲーム' }
+  { page: 'recent', icon: '◷', label: '最近プレイしたゲーム' },
+  { page: 'avatar', icon: '☺', label: 'アバター' },
+  { page: 'settings', icon: '⚙', label: '設定' }
 ];

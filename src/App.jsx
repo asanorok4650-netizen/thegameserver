@@ -6,6 +6,9 @@ import Topbar from './components/Topbar.jsx';
 import RecentSection from './components/RecentSection.jsx';
 import LibrarySection from './components/LibrarySection.jsx';
 import PlaceholderSection from './components/PlaceholderSection.jsx';
+import AvatarSection from './components/AvatarSection.jsx';
+import SettingsSection from './components/SettingsSection.jsx';
+import { useAvatar } from './hooks/useAvatar.js';
 
 export default function App() {
   const [page, setPage] = useState('home');
@@ -14,6 +17,7 @@ export default function App() {
   const [status, setStatus] = useState('');
   const fileInputRef = useRef(null);
   const { items, addFile } = useLibrary();
+  const avatar = useAvatar();
 
   const config = PAGES[page] || PAGES.home;
   const show = (name) => config.sections.includes(name);
@@ -47,12 +51,13 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar page={page} open={sidebarOpen} onNavigate={navigate} />
+      <Sidebar page={page} open={sidebarOpen} onNavigate={navigate} user={avatar.user} />
       <main className="main-area">
         <Topbar
           query={query}
           onQueryChange={setQuery}
           onToggleMenu={() => setSidebarOpen((v) => !v)}
+          user={avatar.user}
         />
         <section className="page-content">
           <div className="welcome-row">
@@ -104,6 +109,9 @@ export default function App() {
               body="公開ワールドや共有されたワールドを探せるようにする予定です。"
             />
           )}
+
+          {show('avatar') && <AvatarSection avatar={avatar} />}
+          {show('settings') && <SettingsSection />}
 
           <p className="status-message" id="status-message" role="status" aria-live="polite">{status}</p>
           <footer>RBXL Player <span>•</span> Browser-based world player</footer>
