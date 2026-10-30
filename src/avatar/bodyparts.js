@@ -62,7 +62,7 @@ export function applyBodyParts(layout, rigType, scales, bodyParts) {
       const hs = scales.head * scales.height;
       const f = pn === 'Head' ? [hs, hs, hs] : [scales.width, scales.height, scales.depth];
       d.size = info.size.map((v, k) => v * f[k]);
-      d.custom = { info };
+      d.custom = { info, variant: e.fixed === e.artist ? 'single' : (info === e.artist ? 'artist' : 'fixed') };
       d.attachments = {};
       for (const [an, a] of Object.entries(info.attachments)) d.attachments[an] = { pos: a.pos.map((v, k) => v * f[k]), rot: a.rot };
       d.rot = I3;
@@ -105,4 +105,21 @@ export function applyBodyParts(layout, rigType, scales, bodyParts) {
     d.rot = cur[d.name].rot;
   }
   return { layout: defs, notes };
+}
+
+const r3 = (v) => Math.round(v * 1000) / 1000;
+const isI = (R) => R && R.every((v, i) => Math.abs(v - I3[i]) < 1e-3);
+
+/** 体パーツの診断テキスト(JSON)。ズレの原因調査用に、サイズ・アタッチメント・組み立て結果をまとめる。 */
+export function describeBodyParts(layout, scales) {
+  const parts = layout.filter((d) => d.custom).map((d) => {
+    const i = d.custom.info, g = i.geometry && i.geometry.bbox;
+    const att = {};
+    for (const [n, a] of Object.entries(i.attachments)) att[n] = isI(a.rot) ? a.pos.map(r3) : { p: a.pos.map(r3), r: a.rot.map(r3) };
+    return { n: d.name, var: d.custom.variant, k: i.kind, size0: i.size.map(r3), size: d.size.map(r3),
+      mesh: g ? g.max.map((v, k) => r3(v - g.min[k])) : null, tex: !!i.texture, alpha: i.transparency || undefined,
+      c: d.center.map(r3), r: isI(d.rot) ? undefined : (d.rot || []).map(r3),
+      cf: i.cframe ? { p: i.cframe.pos.map(r3), r: isI(i.cframe.rot) ? undefined : i.cframe.rot.map(r3) } : null, att };
+  });
+  return JSON.stringify({ scales: { w: scales.width, h: scales.height, d: scales.depth, hd: scales.head, prop: scales.proportion, bt: scales.bodyType }, parts });
 }

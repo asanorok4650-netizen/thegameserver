@@ -2,7 +2,7 @@
 // サムネイルは使わず、リグの各パーツ(Box/Head)をBodyColors・クラシック服・顔で組み上げる。
 import * as THREE from 'three';
 import { layoutFor, faceRectsFor, clothLayers, CLOTH_RECTS, TEMPLATE, bodyAttachPoint } from './rigs.js';
-import { applyBodyParts } from './bodyparts.js';
+import { applyBodyParts, describeBodyParts } from './bodyparts.js';
 
 /** 角を丸めたBox(R6/R15のHeadの近似)。法線は解析的に求めて継ぎ目を消す。 */
 function roundedBoxGeometry(size, radius) {
@@ -188,6 +188,7 @@ export function buildAvatar(desc) {
   const parts = [];
 
   const layout = applyBodyParts(layoutFor(desc.rigType, desc.scales), desc.rigType, desc.scales || {}, desc.bodyParts).layout;
+  const diag = layout.some((d) => d.custom) ? describeBodyParts(layout, desc.scales || {}) : '';
   for (const def of layout) {
     const colorHex = (desc.colors && desc.colors[def.color]) || '#A3A2A5';
     let mesh;
@@ -236,7 +237,7 @@ export function buildAvatar(desc) {
     }
   }
   const box = new THREE.Box3().setFromObject(group);
-  return { group, parts, box, rigType: desc.rigType };
+  return { group, parts, box, rigType: desc.rigType, diag };
 }
 
 export function disposeObject(root) {
