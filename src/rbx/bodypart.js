@@ -28,7 +28,7 @@ function colorOf(p) {
 function readPart(inst) {
   const p = inst.props;
   const info = { size: p.Size || [1, 1, 1], color: colorOf(p), transparency: p.Transparency || 0,
-    meshUri: null, textureUri: null, scale: [1, 1, 1], offset: [0, 0, 0], attachments: {} };
+    meshUri: null, textureUri: null, scale: [1, 1, 1], offset: [0, 0, 0], attachments: {}, cframe: p.CFrame || null };
   if (inst.className === 'MeshPart') {
     info.kind = 'meshpart';
     info.meshUri = p.MeshId || p.MeshContent || null;
