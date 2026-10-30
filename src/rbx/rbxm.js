@@ -1,5 +1,5 @@
 // Roblox バイナリモデル形式(rbxm / rbxl の中身)のパーサ。THREE非依存。
-// 対応: INST / PROP / PRNT チャンク、LZ4圧縮。未対応のプロパティ型は無視して warnings に記録する。
+// 対応: INST / PROP / PRNT チャンク、LZ4圧縮。Content(0x22)・Int64・SecurityCapabilities・Font・OptionalCFrame など。未対応のプロパティ型は無視して warnings に記録する。
 // 未対応: ZSTD圧縮チャンク、XML形式(rbxmx)。
 import { lz4Decompress } from './lz4.js';
 
@@ -37,6 +37,17 @@ class Cur {
     for (let i = 0; i < n; i++) { this._t.setUint32(0, ((a[i] >>> 1) | (a[i] << 31)) >>> 0); out[i] = this._t.getFloat32(0); }
     return out;
   }
+  // バイト並べ替えされた64bit値(ビッグエンディアン+ジグザグ変換)→ Number
+  i64s(n) {
+    const out = new Array(n), u = this.u8, b = this.p;
+    for (let i = 0; i < n; i++) {
+      let v = 0n;
+      for (let k = 0; k < 8; k++) v = (v << 8n) | BigInt(u[b + k * n + i]);
+      out[i] = Number((v >> 1n) ^ -(v & 1n));
+    }
+    this.p += n * 8;
+    return out;
+  }
   refs(n) { const a = this.i32s(n), out = new Int32Array(n); let acc = 0; for (let i = 0; i < n; i++) { acc += a[i]; out[i] = acc; } return out; }
 }
 
@@ -48,7 +59,7 @@ export function isBinaryRbxm(buf) {
 function readProp(cur, type, n, warnings, label) {
   const out = new Array(n);
   switch (type) {
-    case 0x01: for (let i = 0; i < n; i++) out[i] = cur.str(); return out;
+    case 0x01: case 0x1d: for (let i = 0; i < n; i++) out[i] = cur.str(); return out; // String / Bytecode
     case 0x02: for (let i = 0; i < n; i++) out[i] = cur.byte() !== 0; return out;
     case 0x03: return Array.from(cur.i32s(n));
     case 0x04: return Array.from(cur.f32s(n));
@@ -76,6 +87,28 @@ function readProp(cur, type, n, warnings, label) {
     case 0x13: return Array.from(cur.refs(n)); // Instance参照
     case 0x1a: { const r = [], g = [], b = []; for (let i = 0; i < n; i++) r.push(cur.byte()); for (let i = 0; i < n; i++) g.push(cur.byte());
       for (let i = 0; i < n; i++) b.push(cur.byte()); for (let i = 0; i < n; i++) out[i] = [r[i], g[i], b[i]]; return out; }
+    case 0x1b: case 0x21: return cur.i64s(n); // Int64 / SecurityCapabilities(Capabilities プロパティ。描画には無関係)
+    case 0x1c: return Array.from(cur.u32s(n), (i) => ({ shared: i })); // SharedString(SSTRの添字のみ保持)
+    case 0x1e: { // OptionalCFrame: CFrame型ID + CFrame配列 + Bool型ID + 有無の配列
+      if (cur.byte() !== 0x10) throw new Error('OptionalCFrameの形式が不正です');
+      const cfs = readProp(cur, 0x10, n, warnings, label);
+      cur.byte();
+      const has = []; for (let i = 0; i < n; i++) has.push(cur.byte() !== 0);
+      return cfs.map((c, i) => (has[i] ? c : null));
+    }
+    case 0x1f: cur.p += 16 * n; return out.fill(null); // UniqueId(読み飛ばし)
+    case 0x20: for (let i = 0; i < n; i++) { // Font
+      const family = cur.str(); const weight = cur.dv.getUint16(cur.p, true); cur.p += 2; const style = cur.byte(); cur.str();
+      out[i] = { family, weight, style };
+    } return out;
+    case 0x22: { // Content(新形式): MeshContent / TextureContent など。URIだけ取り出す
+      const kinds = cur.i32s(n);
+      const uriCount = cur.u32(), uris = [];
+      for (let i = 0; i < uriCount; i++) uris.push(cur.str());
+      let k = 0;
+      for (let i = 0; i < n; i++) out[i] = kinds[i] === 1 ? (uris[k++] ?? null) : null; // 0=なし 1=URI 2=Object(未対応)
+      return out;
+    }
     default:
       warnings.push(`${label}: 未対応のプロパティ型 0x${type.toString(16)}`);
       return null;
