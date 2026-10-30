@@ -10,10 +10,14 @@ export class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-function proxied(url) {
+function proxyBase() {
   const base = CONFIG.proxyBase.replace(/\/+$/, '');
   if (!base) throw new ApiError('NO_PROXY', 'プロキシURLが未設定です(設定画面で入力してください)');
-  return `${base}/?url=${encodeURIComponent(url)}`;
+  return base;
+}
+
+function proxied(url) {
+  return `${proxyBase()}/?url=${encodeURIComponent(url)}`;
 }
 
 async function http(url, init) {
@@ -52,17 +56,33 @@ export const getAvatarJson = (userId) => getJson(`https://avatar.roblox.com/v1/u
 const bytesCache = new Map();
 const imageCache = new Map();
 
+/**
+ * アセット本体を取得する。Workerの /asset/{id} 経由で、Robloxへの認証(APIキー)はWorker側が行う。
+ * 失敗時は原因ごとのApiErrorを投げる(NO_API_KEY / KEY_REJECTED / ASSET_UNAVAILABLE / RATE_LIMITED / OLD_WORKER ほか)。
+ */
+export async function fetchAssetBytes(id) {
+  const base = proxyBase();
+  let res;
+  try { res = await fetch(`${base}/asset/${id}`); }
+  catch (e) { throw new ApiError('NETWORK', '通信に失敗しました(プロキシURLを確認してください)'); }
+  if (res.ok) return res.arrayBuffer();
+
+  let code = '';
+  try { code = (await res.json()).error || ''; } catch (e) { /* JSONではない応答 */ }
+  if (code === 'NO_API_KEY') throw new ApiError('NO_API_KEY', 'アセットを取得できません: WorkerにROBLOX_API_KEYが設定されていません');
+  if (code === 'KEY_REJECTED') throw new ApiError('KEY_REJECTED', 'アセットを取得できません: APIキーが無効か、期限切れです');
+  if (code === 'NOT_FOUND') throw new ApiError('ASSET_UNAVAILABLE', `アセット ${id} が見つかりません`);
+  if (code === 'RATE_LIMITED') throw new ApiError('RATE_LIMITED', 'アセット取得の回数制限に達しました。少し待ってから再読み込みしてください');
+  if (code === 'ORIGIN_NOT_ALLOWED') throw new ApiError('ORIGIN_NOT_ALLOWED', 'このサイトからのアセット取得はWorkerに許可されていません(ALLOWED_ORIGINを確認)');
+  if (!code && (res.status === 400 || res.status === 404)) {
+    throw new ApiError('OLD_WORKER', 'Workerが古い可能性があります。最新のworker/proxy.jsを再デプロイしてください');
+  }
+  throw new ApiError(`HTTP_${res.status}`, `アセット ${id} の取得に失敗しました(HTTP ${res.status})`);
+}
+
 async function assetBytes(id) {
   if (bytesCache.has(id)) return bytesCache.get(id);
-  const p = (async () => {
-    const meta = await getJson(`https://assetdelivery.roblox.com/v2/assetId/${id}`);
-    const loc = meta && meta.locations && meta.locations[0] && meta.locations[0].location;
-    if (!loc) {
-      const why = meta && meta.errors && meta.errors[0] && meta.errors[0].message;
-      throw new ApiError('ASSET_UNAVAILABLE', `アセット ${id} を取得できません${why ? `(${why})` : ''}`);
-    }
-    return (await http(loc)).arrayBuffer();
-  })();
+  const p = fetchAssetBytes(id);
   bytesCache.set(id, p);
   p.catch(() => bytesCache.delete(id));
   return p;
