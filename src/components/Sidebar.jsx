@@ -1,4 +1,5 @@
 import { NAV_ITEMS } from '../pages.js';
+import Icon from './Icon.jsx';
 
 export default function Sidebar({ page, open, onNavigate, user }) {
   return (
@@ -19,7 +20,7 @@ export default function Sidebar({ page, open, onNavigate, user }) {
             className={`nav-item${page === item.page ? ' active' : ''}`}
             onClick={() => onNavigate(item.page)}
           >
-            <span className="nav-icon">{item.icon}</span>
+            <Icon name={item.icon} className="nav-icon" size={20} />
             {item.label}
           </button>
         ))}

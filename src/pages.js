@@ -33,10 +33,10 @@ export const PAGES = {
 };
 
 export const NAV_ITEMS = [
-  { page: 'home', icon: '⌂', label: 'ホーム' },
-  { page: 'discover', icon: '◈', label: '探索' },
-  { page: 'friends', icon: '♧', label: 'フレンド' },
-  { page: 'recent', icon: '◷', label: '最近プレイしたゲーム' },
-  { page: 'avatar', icon: '☺', label: 'アバター' },
-  { page: 'settings', icon: '⚙', label: '設定' }
+  { page: 'home', icon: 'home', label: 'ホーム' },
+  { page: 'discover', icon: 'compass', label: '探索' },
+  { page: 'friends', icon: 'users', label: 'フレンド' },
+  { page: 'recent', icon: 'clock', label: '最近プレイしたゲーム' },
+  { page: 'avatar', icon: 'user', label: 'アバター' },
+  { page: 'settings', icon: 'settings', label: '設定' }
 ];
