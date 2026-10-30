@@ -2,6 +2,7 @@
 // サムネイルは使わず、リグの各パーツ(Box/Head)をBodyColors・クラシック服・顔で組み上げる。
 import * as THREE from 'three';
 import { layoutFor, faceRectsFor, clothLayers, CLOTH_RECTS, TEMPLATE, bodyAttachPoint } from './rigs.js';
+import { applyBodyParts, describeBodyParts } from './bodyparts.js';
 
 /** 角を丸めたBox(R6/R15のHeadの近似)。法線は解析的に求めて継ぎ目を消す。 */
 function roundedBoxGeometry(size, radius) {
@@ -130,6 +131,52 @@ function buildAccessoryMesh(acc, rigType, layout) {
   return { mesh, attachedTo: body.part };
 }
 
+/** カスタムのボディパーツ1つをメッシュ化する。頭なら顔も貼る。 */
+function buildCustomPart(def, colorHex, faceBitmap) {
+  const info = def.custom.info, g = info.geometry;
+  const pos = new Float32Array(g.positions);
+  if (info.kind === 'meshpart') { // バウンディングボックス中心を原点に、Sizeへ合わせて拡縮
+    const mn = g.bbox.min, mx = g.bbox.max;
+    for (let i = 0; i < pos.length; i += 3) {
+      for (let k = 0; k < 3; k++) {
+        const ext = mx[k] - mn[k] || 1;
+        pos[i + k] = (pos[i + k] - (mn[k] + mx[k]) / 2) * ((def.size[k] || ext) / ext);
+      }
+    }
+  } else { // SpecialMesh: 生の頂点 × Scale + Offset
+    for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) pos[i + k] = pos[i + k] * info.scale[k] + info.offset[k];
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(g.normals), 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.uvs), 2));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(g.indices), 1));
+  let map = null;
+  if (info.texture) { map = new THREE.Texture(info.texture); map.flipY = false; map.colorSpace = THREE.SRGBColorSpace; map.needsUpdate = true; }
+  const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.8, side: THREE.DoubleSide,
+    color: map ? 0xffffff : colorHex, transparent: info.transparency > 0, opacity: 1 - (info.transparency || 0) });
+  const mesh = new THREE.Mesh(geo, mat);
+  if (info.transparency >= 0.99) mesh.visible = false; // ヘッドレスなど
+  if (def.shape === 'head' && info.transparency < 0.99) {
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox, cx = (bb.min.x + bb.max.x) / 2, cy = (bb.min.y + bb.max.y) / 2, w = bb.max.x - bb.min.x;
+    let zFront = Infinity; // 顔の中心付近で一番手前の頂点に合わせる(曲面でも浮きにくい)
+    for (let i = 0; i < pos.length; i += 3) {
+      if (Math.abs(pos[i] - cx) < w * 0.2 && Math.abs(pos[i + 1] - cy) < w * 0.2) zFront = Math.min(zFront, pos[i + 2]);
+    }
+    if (!Number.isFinite(zFront)) zFront = bb.min.z;
+    const fs = w * 0.62;
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(fs, fs),
+      new THREE.MeshBasicMaterial({ map: newTexture(faceBitmap ? faceCanvasFrom(faceBitmap) : defaultFaceCanvas()),
+        transparent: true, polygonOffset: true, polygonOffsetFactor: -2 }));
+    face.name = 'Face';
+    face.rotation.y = Math.PI;
+    face.position.set(cx, cy, zFront - 0.004);
+    mesh.add(face);
+  }
+  return mesh;
+}
+
 /**
  * @param desc { rigType:'R6'|'R15', colors:{head,torso,leftArm,rightArm,leftLeg,rightLeg}, scales,
  *               clothing:{shirt,pants,tshirt}(ImageBitmap|Canvas|null), face:(ImageBitmap|Canvas|null) }
@@ -140,11 +187,14 @@ export function buildAvatar(desc) {
   const clothing = desc.clothing || {};
   const parts = [];
 
-  const layout = layoutFor(desc.rigType, desc.scales);
+  const layout = applyBodyParts(layoutFor(desc.rigType, desc.scales), desc.rigType, desc.scales || {}, desc.bodyParts).layout;
+  const diag = layout.some((d) => d.custom) ? describeBodyParts(layout, desc.scales || {}) : '';
   for (const def of layout) {
     const colorHex = (desc.colors && desc.colors[def.color]) || '#A3A2A5';
     let mesh;
-    if (def.shape === 'head') {
+    if (def.custom) {
+      mesh = buildCustomPart(def, colorHex, desc.face);
+    } else if (def.shape === 'head') {
       const geo = roundedBoxGeometry(def.size, 0.22 * def.size[0] / 1.25);
       mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.75 }));
       const fs = def.size[0] * 0.62;
@@ -171,8 +221,11 @@ export function buildAvatar(desc) {
     mesh.name = def.name;
     mesh.position.set(def.center[0], def.center[1], def.center[2]);
     mesh.castShadow = true;
+    if (def.rot) mesh.setRotationFromMatrix(new THREE.Matrix4().set(def.rot[0], def.rot[1], def.rot[2], 0,
+      def.rot[3], def.rot[4], def.rot[5], 0, def.rot[6], def.rot[7], def.rot[8], 0, 0, 0, 0, 1));
     group.add(mesh);
-    parts.push({ name: def.name, color: def.color, object: mesh, clothed: !!(def.cloth && clothLayers(def.cloth).some((L) => clothing[L])) });
+    parts.push({ name: def.name, color: def.color, object: mesh, custom: !!def.custom,
+      clothed: !def.custom && !!(def.cloth && clothLayers(def.cloth).some((L) => clothing[L])) });
   }
   for (const acc of desc.accessories || []) {
     try {
@@ -184,7 +237,7 @@ export function buildAvatar(desc) {
     }
   }
   const box = new THREE.Box3().setFromObject(group);
-  return { group, parts, box, rigType: desc.rigType };
+  return { group, parts, box, rigType: desc.rigType, diag };
 }
 
 export function disposeObject(root) {

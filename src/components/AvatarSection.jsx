@@ -16,6 +16,7 @@ function PartToggle({ part }) {
           }}
         />
         <span>{part.name}</span>
+        {part.custom && <span className="tag ok">体</span>}
         {part.clothed && <span className="tag ok">服</span>}
         {part.accessory && <span className={`tag ${part.error ? 'error' : 'ok'}`}>{part.error ? '失敗' : 'アクセ'}</span>}
       </label>
@@ -86,6 +87,15 @@ export default function AvatarSection({ avatar }) {
               {parts.map((p, i) => <PartToggle key={`${i}-${p.name}`} part={p} />)}
             </ul>
           </div>
+          {built && built.diag && (
+            <div className="panel">
+              <h3>体パーツ診断</h3>
+              <textarea className="text-input" readOnly rows={4} value={built.diag} onFocus={(e) => e.target.select()} />
+              <button type="button" className="secondary-button" onClick={() => navigator.clipboard && navigator.clipboard.writeText(built.diag)}>
+                コピー
+              </button>
+            </div>
+          )}
           <div className="panel">
             <h3>アセット</h3>
             {report.length === 0 ? (

@@ -124,7 +124,7 @@ const tri = [vtx([0, 0, 0], [0, 0, 1], [0, 0]), vtx([2, 0, 0], [0, 0, 1], [1, 0]
   const m = parseMesh(new TextEncoder().encode(txt));
   assert.deepEqual([...m.positions.slice(0, 6)], [1, 0, 0, 0, 2, 0]);
 }
-assert.throws(() => parseMesh(new TextEncoder().encode('version 7.00\n....')), /未対応/);
+assert.throws(() => parseMesh(new TextEncoder().encode('version 8.00\n....')), /未対応/);
 assert.throws(() => parseMesh(new TextEncoder().encode('hello world!!!')), /形式ではありません/);
 
 // ---- アクセサリ配置(R6頭のHatAttachment (0,0.6,0) とHandle側アタッチメントを一致させる) ----

@@ -137,6 +137,12 @@ export function bodyAttachPoint(rigType, layout, attName) {
   const [pn, off] = rigType === 'R6' ? [e[0], e[1]] : [e[2], e[3]];
   const part = layout.find((p) => p.name === pn);
   if (!part) return null;
+  const own = part.attachments && part.attachments[attName]; // カスタムのボディパーツが持つ実アタッチメント
+  if (own) {
+    const R = part.rot || [1, 0, 0, 0, 1, 0, 0, 0, 1], v = own.pos;
+    return { part: pn, pos: [part.center[0] + R[0] * v[0] + R[1] * v[1] + R[2] * v[2],
+      part.center[1] + R[3] * v[0] + R[4] * v[1] + R[5] * v[2], part.center[2] + R[6] * v[0] + R[7] * v[1] + R[8] * v[2]] };
+  }
   const k = pn === 'Head' && rigType !== 'R6' ? part.size[1] / 1.2 : 1; // R15頭のスケール追従
   return { part: pn, pos: [part.center[0] + off[0] * k, part.center[1] + off[1] * k, part.center[2] + off[2] * k] };
 }
