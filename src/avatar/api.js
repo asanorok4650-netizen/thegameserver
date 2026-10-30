@@ -5,6 +5,7 @@ import { DEFAULT_SCALES, brickHex } from './rigs.js';
 import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
 import { parseMesh } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
+import { extractBodyPart } from '../rbx/bodypart.js';
 
 export class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -148,8 +149,35 @@ export async function loadAccessory(assetId) {
   return { ...acc, geometry, texture };
 }
 
+/** ボディパーツ(Head/Torso/Arm/Leg/DynamicHead)を読み込む → { slot, rig, parts:{名前:{fixed,artist}} }(各infoにgeometry/texture付き) */
+export async function loadBodyPart(assetId, rigType, slot) {
+  const buf = await assetBytes(assetId);
+  if (!isBinaryRbxm(buf)) throw new ApiError('UNSUPPORTED_FORMAT', 'XML形式のボディパーツは未対応です');
+  const tree = parseRbxm(buf);
+  const ex = extractBodyPart(tree, rigType, slot);
+  if (!ex) {
+    const w = tree.warnings.filter((x) => /Mesh|Texture/.test(x)).slice(0, 2).join(' / ');
+    throw new ApiError('NO_PART', `${rigType}用のメッシュパーツがありません(標準形状か未対応の形式)${w ? ` 警告: ${w}` : ''}`);
+  }
+  const meshCache = new Map(), texCache = new Map();
+  const infos = new Set();
+  for (const e of Object.values(ex.parts)) { infos.add(e.fixed); infos.add(e.artist); }
+  await Promise.all([...infos].filter(Boolean).map(async (info) => {
+    const mid = parseAssetUri(info.meshUri);
+    if (!meshCache.has(mid)) meshCache.set(mid, assetBytes(mid).then(parseMesh));
+    info.geometry = await meshCache.get(mid);
+    const tid = parseAssetUri(info.textureUri);
+    if (tid) {
+      if (!texCache.has(tid)) texCache.set(tid, textureForAsset(tid).catch(() => null)); // テクスチャ無しでも表示
+      info.texture = await texCache.get(tid);
+    }
+  }));
+  return { slot, ...ex };
+}
+
 // ---- アバター記述子 ----
 const ASSET_TYPE = { 2: 'tshirt', 11: 'shirt', 12: 'pants', 18: 'face' };
+const BODY_SLOT = { 17: 'head', 79: 'head', 27: 'torso', 28: 'rightArm', 29: 'leftArm', 30: 'leftLeg', 31: 'rightLeg' }; // Head, DynamicHead, Torso, RightArm, LeftArm, LeftLeg, RightLeg
 const ACCESSORY_TYPES = new Set([8, 41, 42, 43, 44, 45, 46, 47]); // Hat, Hair, Face, Neck, Shoulder, Front, Back, Waist
 
 function hex(v, fallback) {
@@ -175,7 +203,7 @@ export async function buildDescriptor(av, onProgress = () => {}) {
   const s = av.scales || {};
   const scales = { ...DEFAULT_SCALES, height: s.height ?? 1, width: s.width ?? 1, depth: s.depth ?? 1,
     head: s.head ?? 1, proportion: s.proportion ?? 0, bodyType: s.bodyType ?? 0 };
-  const desc = { rigType, scales, colors: readColors(av), clothing: {}, face: null, accessories: [], report: [] };
+  const desc = { rigType, scales, colors: readColors(av), clothing: {}, face: null, accessories: [], bodyParts: {}, report: [] };
 
   const jobs = [];
   let done = 0;
@@ -185,9 +213,16 @@ export async function buildDescriptor(av, onProgress = () => {}) {
     const entry = { id: a.id, name: a.name, type: typeName, status: 'skip', note: '次フェーズで対応予定' };
     desc.report.push(entry);
     const isAcc = ACCESSORY_TYPES.has(a.assetType && a.assetType.id);
-    if (!slot && !isAcc) continue;
+    const bodySlot = BODY_SLOT[a.assetType && a.assetType.id];
+    if (!slot && !isAcc && !bodySlot) continue;
     jobs.push((async () => {
       try {
+        if (bodySlot) {
+          const bp = await loadBodyPart(a.id, rigType, bodySlot);
+          desc.bodyParts[bodySlot] = bp;
+          entry.status = 'ok'; entry.note = `適用済み(${Object.keys(bp.parts).length}パーツ)`;
+          return;
+        }
         if (isAcc) {
           const acc = await loadAccessory(a.id);
           acc.name = a.name;
