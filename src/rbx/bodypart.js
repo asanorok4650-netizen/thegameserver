@@ -78,5 +78,18 @@ export function extractBodyPart(tree, rigType, slot) {
       if (e.fixed || e.artist) out[name] = e;
     }
   }
+  if (!Object.keys(out).length && rigType !== 'R6' && slot === 'head') { // DynamicHeadなど: 名前が違っていても、メッシュを持つMeshPartを頭として使う
+    const cand = parts.filter((i) => i.className === 'MeshPart' && !inFolder(i, ['R6']))
+      .map((i) => ({ i, info: readPart(i) })).filter((x) => x.info);
+    const pick = cand.find((x) => /head/i.test(nm(x.i))) || cand[0];
+    if (pick) out.Head = { fixed: pick.info, artist: pick.info };
+  }
   return Object.keys(out).length ? { rig: rigType, parts: out } : null;
+}
+
+/** 失敗時の調査用: メッシュ関連インスタンスの一覧(クラス:名前(メッシュID))。 */
+export function describeTree(tree, max = 10) {
+  const items = [...tree.instances.values()].filter((i) => /Part$/.test(i.className) || i.className === 'SpecialMesh');
+  const f = (i) => `${i.className}:${nm(i)}(${String(i.props.MeshId || i.props.MeshContent || 'メッシュ指定なし').slice(0, 28)})`;
+  return `${items.length}件 [${items.slice(0, max).map(f).join(', ')}${items.length > max ? ', …' : ''}]`;
 }
