@@ -1,9 +1,0 @@
-name = "rbxl-player-proxy"
-main = "worker/proxy.js"
-compatibility_date = "2026-10-01"
-
-# [vars]
-# ALLOWED_ORIGIN = "https://your-site.example"
-
-# APIキーは [vars] に書かないこと(リポジトリに残ってしまう)。シークレットとして保存する:
-#   npx wrangler secret put ROBLOX_API_KEY
