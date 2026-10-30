@@ -5,7 +5,7 @@ import { DEFAULT_SCALES, brickHex } from './rigs.js';
 import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
 import { parseMeshAsync } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
-import { extractBodyPart } from '../rbx/bodypart.js';
+import { extractBodyPart, describeTree } from '../rbx/bodypart.js';
 
 export class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -157,7 +157,7 @@ export async function loadBodyPart(assetId, rigType, slot) {
   const ex = extractBodyPart(tree, rigType, slot);
   if (!ex) {
     const w = tree.warnings.filter((x) => /Mesh|Texture/.test(x)).slice(0, 2).join(' / ');
-    throw new ApiError('NO_PART', `${rigType}用のメッシュパーツがありません(標準形状か未対応の形式)${w ? ` 警告: ${w}` : ''}`);
+    throw new ApiError('NO_PART', `${rigType}用のメッシュパーツがありません(標準形状か未対応の形式) 構造: ${describeTree(tree)}${w ? ` 警告: ${w}` : ''}`);
   }
   const meshCache = new Map(), texCache = new Map();
   const infos = new Set();
