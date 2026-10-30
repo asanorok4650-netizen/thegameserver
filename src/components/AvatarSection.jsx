@@ -16,6 +16,7 @@ function PartToggle({ part }) {
           }}
         />
         <span>{part.name}</span>
+        {part.custom && <span className="tag ok">体</span>}
         {part.clothed && <span className="tag ok">服</span>}
         {part.accessory && <span className={`tag ${part.error ? 'error' : 'ok'}`}>{part.error ? '失敗' : 'アクセ'}</span>}
       </label>
