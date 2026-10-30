@@ -1,6 +1,6 @@
 import { NAV_ITEMS } from '../pages.js';
 
-export default function Sidebar({ page, open, onNavigate }) {
+export default function Sidebar({ page, open, onNavigate, user }) {
   return (
     <aside className={`sidebar${open ? ' open' : ''}`} id="sidebar">
       <a
@@ -27,8 +27,8 @@ export default function Sidebar({ page, open, onNavigate }) {
       <div className="sidebar-bottom">
         <div className="sidebar-note">ローカルのワールドを<br />ブラウザで楽しもう。</div>
         <div className="profile-mini">
-          <div className="avatar">G</div>
-          <div><strong>ゲスト</strong><small>ローカルモード</small></div>
+          <div className="avatar">{user ? user.displayName.charAt(0).toUpperCase() : 'G'}</div>
+          <div><strong>{user ? user.displayName : 'ゲスト'}</strong><small>{user ? '@' + user.name : 'ローカルモード'}</small></div>
         </div>
       </div>
     </aside>
