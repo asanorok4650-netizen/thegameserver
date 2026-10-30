@@ -21,10 +21,20 @@ export default function SettingsSection() {
     }
     setMsg({ text: 'テスト中…', kind: '' });
     try {
+      // 1) Workerのバージョンと、APIキーが設定されているか(値は返ってこない)
+      const h = await fetch(`${base}/health`);
+      const health = h.ok ? await h.json().catch(() => null) : null;
+      if (!health || !health.ok) {
+        setMsg({ text: 'Workerに接続できないか、古いバージョンです。最新の worker/proxy.js を再デプロイしてください。', kind: 'error' });
+        return;
+      }
+      // 2) ユーザー情報など公開APIの中継
       const r = await fetch(`${base}/?url=${encodeURIComponent('https://users.roblox.com/v1/users/1')}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
-      setMsg({ text: `接続OK(ユーザーID 1: ${j.name || '?'})`, kind: 'ok' });
+      setMsg(health.hasApiKey
+        ? { text: `接続OK(ユーザーID 1: ${j.name || '?'})/ APIキー: 設定済み`, kind: 'ok' }
+        : { text: `接続OK(ユーザーID 1: ${j.name || '?'})ですが、APIキーが未設定のためアセット(服・アクセサリ)は取得できません。README の手順で ROBLOX_API_KEY を設定してください。`, kind: 'error' });
     } catch (e) {
       setMsg({ text: '接続に失敗しました。URLとWorkerのデプロイを確認してください。', kind: 'error' });
     }
