@@ -3,7 +3,7 @@
 import { CONFIG } from '../config.js';
 import { DEFAULT_SCALES, brickHex } from './rigs.js';
 import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
-import { parseMesh } from '../rbx/mesh.js';
+import { parseMeshAsync } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
 import { extractBodyPart } from '../rbx/bodypart.js';
 
@@ -142,7 +142,7 @@ export async function loadAccessory(assetId) {
   if (!acc) throw new ApiError('NO_HANDLE', 'Handleが見つかりません');
   const meshId = parseAssetUri(acc.handle.meshUri);
   if (!meshId) throw new ApiError('NO_MESH', 'メッシュIDがありません(組み込みメッシュは未対応)');
-  const geometry = parseMesh(await assetBytes(meshId));
+  const geometry = await parseMeshAsync(await assetBytes(meshId));
   let texture = null;
   const texId = parseAssetUri(acc.handle.textureUri);
   if (texId) { try { texture = await textureForAsset(texId); } catch (e) { /* テクスチャ無しで表示 */ } }
@@ -164,7 +164,7 @@ export async function loadBodyPart(assetId, rigType, slot) {
   for (const e of Object.values(ex.parts)) { infos.add(e.fixed); infos.add(e.artist); }
   await Promise.all([...infos].filter(Boolean).map(async (info) => {
     const mid = parseAssetUri(info.meshUri);
-    if (!meshCache.has(mid)) meshCache.set(mid, assetBytes(mid).then(parseMesh));
+    if (!meshCache.has(mid)) meshCache.set(mid, assetBytes(mid).then((b) => parseMeshAsync(b)));
     info.geometry = await meshCache.get(mid);
     const tid = parseAssetUri(info.textureUri);
     if (tid) {
