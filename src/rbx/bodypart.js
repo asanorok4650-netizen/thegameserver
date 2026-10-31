@@ -1,7 +1,8 @@
 // ボディパーツ(Head/Torso/Arm/Leg/DynamicHead)のアセットから、描画に必要な情報を取り出す。THREE非依存。
 // R15: MeshPart(UpperTorso など)。R15ArtistIntent / R15Fixed フォルダがあれば両方を保持する。
 // R6 : Part + SpecialMesh(FileMesh)。R6 フォルダがあればそちらを優先。
-import { parseAssetUri } from './accessory.js';
+import { parseAssetUri, readSpecialMesh } from './accessory.js';
+import { isPrimitiveType } from './primitives.js';
 
 export const R15_NAMES = {
   head: ['Head'], torso: ['UpperTorso', 'LowerTorso'],
@@ -37,16 +38,13 @@ function readPart(inst) {
     const sm = inst.children.find((c) => c.className === 'SpecialMesh');
     if (!sm) return null;
     info.kind = 'special';
-    info.meshUri = sm.props.MeshId || sm.props.MeshContent || null;
-    info.textureUri = sm.props.TextureId || sm.props.TextureID || sm.props.TextureContent || null;
-    info.scale = sm.props.Scale || [1, 1, 1];
-    info.offset = sm.props.Offset || [0, 0, 0];
+    Object.assign(info, readSpecialMesh(sm));
   }
   if (!info.textureUri) { // SurfaceAppearance の ColorMap
     const sa = inst.children.find((c) => c.className === 'SurfaceAppearance');
     if (sa) info.textureUri = sa.props.ColorMap || sa.props.ColorMapContent || null;
   }
-  if (!parseAssetUri(info.meshUri)) return null;
+  if (!isPrimitiveType(info.meshType) && !parseAssetUri(info.meshUri)) return null; // 組み込み形状(Brick/Sphere等)はメッシュID不要
   for (const a of inst.children) {
     if (a.className !== 'Attachment' || !a.props.CFrame) continue;
     info.attachments[nm(a)] = { pos: a.props.CFrame.pos, rot: a.props.CFrame.rot || IDENT };
