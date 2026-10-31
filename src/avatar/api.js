@@ -6,6 +6,7 @@ import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
 import { parseMeshAsync } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
 import { extractBodyPart, describeTree } from '../rbx/bodypart.js';
+import { primitiveGeometry, isPrimitiveType } from '../rbx/primitives.js';
 
 export class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -140,9 +141,14 @@ export async function loadAccessory(assetId) {
   if (!isBinaryRbxm(buf)) throw new ApiError('UNSUPPORTED_FORMAT', 'XML形式のアクセサリは未対応です');
   const acc = extractAccessory(parseRbxm(buf));
   if (!acc) throw new ApiError('NO_HANDLE', 'Handleが見つかりません');
-  const meshId = parseAssetUri(acc.handle.meshUri);
-  if (!meshId) throw new ApiError('NO_MESH', 'メッシュIDがありません(組み込みメッシュは未対応)');
-  const geometry = await parseMeshAsync(await assetBytes(meshId));
+  let geometry;
+  if (isPrimitiveType(acc.handle.meshType)) { // SpecialMesh の組み込み形状(Brick/Sphere/Cylinder/Wedge/Head など)
+    geometry = primitiveGeometry(acc.handle.meshType, acc.handle.size);
+  } else {
+    const meshId = parseAssetUri(acc.handle.meshUri);
+    if (!meshId) throw new ApiError('NO_MESH', 'メッシュIDがありません');
+    geometry = await parseMeshAsync(await assetBytes(meshId));
+  }
   let texture = null;
   const texId = parseAssetUri(acc.handle.textureUri);
   if (texId) { try { texture = await textureForAsset(texId); } catch (e) { /* テクスチャ無しで表示 */ } }
@@ -163,9 +169,12 @@ export async function loadBodyPart(assetId, rigType, slot) {
   const infos = new Set();
   for (const e of Object.values(ex.parts)) { infos.add(e.fixed); infos.add(e.artist); }
   await Promise.all([...infos].filter(Boolean).map(async (info) => {
-    const mid = parseAssetUri(info.meshUri);
-    if (!meshCache.has(mid)) meshCache.set(mid, assetBytes(mid).then((b) => parseMeshAsync(b)));
-    info.geometry = await meshCache.get(mid);
+    if (isPrimitiveType(info.meshType)) info.geometry = primitiveGeometry(info.meshType, info.size);
+    else {
+      const mid = parseAssetUri(info.meshUri);
+      if (!meshCache.has(mid)) meshCache.set(mid, assetBytes(mid).then((b) => parseMeshAsync(b)));
+      info.geometry = await meshCache.get(mid);
+    }
     const tid = parseAssetUri(info.textureUri);
     if (tid) {
       if (!texCache.has(tid)) texCache.set(tid, textureForAsset(tid).catch(() => null)); // テクスチャ無しでも表示
