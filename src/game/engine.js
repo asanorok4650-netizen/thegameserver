@@ -44,7 +44,7 @@ export class Game {
     this.jumpHeld = false;
     this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.initialSpawn = this.spawn.slice();
     this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
-    this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.activeRuleTriggers = new Set();
+    this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.ruleTriggerParts = []; this.activeRuleTriggers = new Set();
     this.activeTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
@@ -136,6 +136,8 @@ export class Game {
         this.logicHandlers.onComplete?.();
       }
     }) : null;
+    const watched = this.ruleRuntime?.watchedPartIds();
+    this.ruleTriggerParts = watched && this.world?.ruleTriggers ? this.world.ruleTriggers.filter((part) => watched.has(part.id)) : (this.world?.ruleTriggers || []);
     this.activeRuleTriggers.clear();
     this.ruleRuntime?.start();
   }
@@ -213,11 +215,9 @@ export class Game {
       if (this.completed) break;
     }
     this.activeTriggers = now;
-    if (this.ruleRuntime?.usesContactEvents && this.world?.ruleTriggers?.length) {
+    if (this.ruleRuntime?.usesContactEvents && this.ruleTriggerParts.length) {
       const active = new Set();
-      const watched = this.ruleRuntime.watchedPartIds();
-      for (const trigger of this.world.ruleTriggers) {
-        if (watched && !watched.has(trigger.id)) continue;
+      for (const trigger of this.ruleTriggerParts) {
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
         if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onTouch(trigger); }
