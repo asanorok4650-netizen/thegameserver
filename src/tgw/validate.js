@@ -1,5 +1,6 @@
 // .tgw の検証(ZIPライブラリ非依存の純関数)。Studioのアップロード前と、クライアント/ルーム起動時の読み込みで使う。
 // 仕様: tgw-spec-v0.1 §3 §4 §8
+import { validateEventRules } from '../rules/schema.js';
 
 export const SUPPORTED_MAJOR = 1;
 export const LIMITS = { maxEntries: 2000, maxTotalUnpacked: 300 * 1024 * 1024, maxPackedBytes: 100 * 1024 * 1024 };
