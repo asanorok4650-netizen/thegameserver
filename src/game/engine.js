@@ -135,17 +135,11 @@ export class Game {
   }
 
   _resolve() {
-    const c = this.collision, pt = [0, 0, 0];
-    let up = false, ceil = false;
-    for (const y of this.sy) {
-      pt[0] = this.p.x; pt[1] = this.p.y + y; pt[2] = this.p.z;
-      if (c.pushOut(pt, RADIUS)) {
-        this.p.set(pt[0], pt[1] - y, pt[2]);
-        if (c.maxNy > 0.5) up = true;
-        if (c.minNy < -0.5) ceil = true;
-      }
-    }
-    return { up, ceil };
+    const c = this.collision;
+    const position = [this.p.x, this.p.y, this.p.z];
+    const collided = c.pushOutCapsule(position, RADIUS, RADIUS, this.height - RADIUS);
+    this.p.set(position[0], position[1], position[2]);
+    return { up: collided && c.maxNy > 0.5, ceil: collided && c.minNy < -0.5 };
   }
 
   _checkTriggers() {

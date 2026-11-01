@@ -39,6 +39,34 @@ export function sphereIntersectsOBB(point, radius, box) {
   return ex * ex + ey * ey + ez * ez <= triggerRadius * triggerRadius;
 }
 
+
+/** 線分とAABBの最近接点。カプセル軸と箱の距離を求める。 */
+function closestSegmentAabb(a, b, h) {
+  const at = (t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const clamp = (v, m) => Math.max(-m, Math.min(m, v));
+  const sample = (t) => {
+    const p = at(t), q = p.map((v, i) => clamp(v, h[i]));
+    const d = [p[0]-q[0], p[1]-q[1], p[2]-q[2]];
+    return { p, q, d2: d[0]*d[0]+d[1]*d[1]+d[2]*d[2] };
+  };
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 24; i++) {
+    const t1 = (2*lo+hi)/3, t2 = (lo+2*hi)/3;
+    if (sample(t1).d2 <= sample(t2).d2) hi = t2; else lo = t1;
+  }
+  const best = sample((lo+hi)/2);
+  if (best.d2 > 1e-12) {
+    const d = Math.sqrt(best.d2);
+    return { point: best.p, normal: best.d.map(v => v/d), depth: null, distance: d };
+  }
+  // 線分が箱の内部を通る場合は、最近接点から最も近い面へ押し出す。
+  const gaps = h.map((v,i) => v - Math.abs(best.p[i]));
+  let axis = gaps.indexOf(Math.min(...gaps));
+  const normal = [0,0,0];
+  normal[axis] = best.p[axis] < 0 ? -1 : 1;
+  return { point: best.p, normal, depth: gaps[axis], distance: 0 };
+}
+
 const CELL = 16;
 const hash = (x, y, z) => ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) | 0;
 
@@ -98,6 +126,51 @@ export class CollisionWorld {
       for (const c of cand) if (this._test(c, p, r)) hit = true;
       if (!hit) break;
       any = true;
+    }
+    return any;
+  }
+
+  /** プレイヤーを1本の垂直カプセルとして衝突解決する。pは足元、yBottom/yTopは軸線の高さ。 */
+  pushOutCapsule(p, radius, yBottom, yTop) {
+    this.maxNy = -1; this.minNy = 1;
+    let any = false;
+    for (let iter = 0; iter < 8; iter++) {
+      let hit = false;
+      const minY = p[1] + yBottom - radius, maxY = p[1] + yTop + radius;
+      for (const c of this.items) {
+        if (p[0] + radius < c.min[0] || p[0] - radius > c.max[0] ||
+            maxY < c.min[1] || minY > c.max[1] ||
+            p[2] + radius < c.min[2] || p[2] - radius > c.max[2]) continue;
+        if (c.type === 'ball') {
+          const sy = Math.max(p[1] + yBottom, Math.min(p[1] + yTop, c.pos[1]));
+          const dx = p[0]-c.pos[0], dy = sy-c.pos[1], dz = p[2]-c.pos[2];
+          const d = Math.hypot(dx,dy,dz), depth = radius + c.radius - d;
+          if (depth <= 0) continue;
+          const nx = d > 1e-8 ? dx/d : 0, ny = d > 1e-8 ? dy/d : 1, nz = d > 1e-8 ? dz/d : 0;
+          this._apply(p,nx,ny,nz,depth); hit = true; continue;
+        }
+        if (c.type === 'convex') {
+          // 楔形は上下端と中央の3点でカプセルを近似し、既存の凸形状判定を利用する。
+          for (const y of [yBottom, (yBottom+yTop)/2, yTop]) {
+            const point = [p[0],p[1]+y,p[2]];
+            if (this._test(c,point,radius)) { p[0] += point[0]-p[0]; p[1] += point[1]-y; p[2] += point[2]-p[2]; hit = true; }
+          }
+          continue;
+        }
+        const R=c.rot, dx=p[0]-c.pos[0], dy=p[1]-c.pos[1], dz=p[2]-c.pos[2];
+        const toLocal = (x,y,z) => [R[0]*x+R[3]*y+R[6]*z,R[1]*x+R[4]*y+R[7]*z,R[2]*x+R[5]*y+R[8]*z];
+        const a=toLocal(dx,dy+yBottom,dz), b=toLocal(dx,dy+yTop,dz);
+        const near=closestSegmentAabb(a,b,c.half);
+        const depth=near.distance > 1e-8 ? radius-near.distance : radius+near.depth;
+        if (depth <= 0) continue;
+        const n=near.normal;
+        const nx=R[0]*n[0]+R[1]*n[1]+R[2]*n[2];
+        const ny=R[3]*n[0]+R[4]*n[1]+R[5]*n[2];
+        const nz=R[6]*n[0]+R[7]*n[1]+R[8]*n[2];
+        this._apply(p,nx,ny,nz,depth); hit=true;
+      }
+      if (!hit) break;
+      any=true;
     }
     return any;
   }
