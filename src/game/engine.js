@@ -204,7 +204,7 @@ export class Game {
       }
       if (!touching) continue;
       now.add(trigger.id);
-      if (!this.activeTriggers.has(trigger.id)) {
+      if (this.logicRuntime && !this.activeTriggers.has(trigger.id)) {
         for (const tag of trigger.tags) {
           this.logicRuntime.onContact({ tag, part: trigger, position: this.p });
           if (this.completed) break;
