@@ -15,3 +15,11 @@
 .game-log{position:absolute;left:12px;bottom:12px;max-width:min(420px,calc(100% - 24px));max-height:38%;overflow:auto;background:#000000b0;color:#fff;border-radius:10px;padding:10px 12px;font-size:11px;line-height:1.7;pointer-events:none}
 .game-log.big{inset:64px 12px auto 12px;bottom:auto;max-height:70%;max-width:none;pointer-events:auto}
 .log-ok{color:#8fe3a8}.log-warn{color:#ffd37a}.log-error{color:#ff9d9d}.log-info{color:#dfe6ff}
+.game-clear-overlay{position:absolute;inset:0;z-index:5;display:grid;place-items:center;padding:24px;background:#10182a88;backdrop-filter:blur(7px);pointer-events:auto}
+.game-clear-card{width:min(360px,100%);padding:32px 26px 26px;border:1px solid #ffffff55;border-radius:24px;background:linear-gradient(155deg,#fffffffa,#eef3ffff);box-shadow:0 24px 80px #07152c55;text-align:center;color:#17233c}
+.game-clear-mark{display:grid;place-items:center;width:64px;height:64px;margin:0 auto 14px;border-radius:20px;background:#fff0bf;color:#d18a00;font-size:36px}
+.game-clear-card h2{margin:0;font-size:25px;font-weight:850}
+.game-clear-card p{margin:10px 0 24px;color:#66728a;font-size:14px}
+.game-replay-button,.game-clear-exit{display:block;width:100%;border:0;border-radius:13px;padding:13px 16px;font:700 14px inherit;cursor:pointer}
+.game-replay-button{background:#315bea;color:#fff;box-shadow:0 5px 14px #315bea40}
+.game-clear-exit{margin-top:9px;background:#e9edf5;color:#43516a}

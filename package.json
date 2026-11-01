@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/rigs.test.mjs && node --import ./test/register.mjs test/builder.test.mjs && node --import ./test/register.mjs test/rbxm.test.mjs && node test/mesh.test.mjs && node test/worker.test.mjs && node test/api.test.mjs && node test/tgw.test.mjs && node test/studio.test.mjs && node test/logics.test.mjs"
+    "test": "node test/rigs.test.mjs && node --import ./test/register.mjs test/builder.test.mjs && node --import ./test/register.mjs test/rbxm.test.mjs && node test/mesh.test.mjs && node test/worker.test.mjs && node test/api.test.mjs && node test/tgw.test.mjs && node test/studio.test.mjs && node test/logics.test.mjs && node test/obby-runtime.test.mjs"
   },
   "dependencies": {
     "fflate": "^0.8.2",
