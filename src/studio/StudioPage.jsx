@@ -8,6 +8,7 @@ import { LOGICS, getLogicDefinition, getLogicDefaults } from '../logics/index.js
 import FieldForm from './FieldForm.jsx';
 import { BEHAVIOR_LIST, BEHAVIORS, resolveBehavior } from '../behaviors/index.js';
 import { RULE_FIELDS, ENV_FIELDS, defaultRules, defaultEnvironment } from '../game/rules.js';
+import RulesSection from './RulesSection.jsx';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
@@ -67,7 +68,7 @@ function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate, onBehav
       {one && <BehaviorSection part={one} ids={ids} onBehavior={onBehavior} onParam={onParam} />}
       {one && (
         <div className="st-field">
-          <span className="st-label">ロジックタグ</span>
+          <span className="st-label">旧ロジック用タグ（互換）</span>
           {logic?.tags?.length ? (
             <div className="st-tag-options">
               {logic.tags.map((tag) => (
@@ -82,7 +83,7 @@ function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate, onBehav
                 </label>
               ))}
             </div>
-          ) : <p className="st-note">ワールド設定でロジックを選ぶと、利用できるタグが表示されます。</p>}
+          ) : <p className="st-note">旧ロジックを利用するワールドでのみ使用します。新規ワールドではイベントルールを使ってください。</p>}
           <label className="st-field"><span className="st-label">追加タグ(カンマ区切り)</span>
             <input className="text-input" defaultValue={(one.tags || []).filter((t) => !logic?.tags?.some((x) => x.id === t)).join(', ')} key={one.id + '-custom-tags'}
               onBlur={(e) => {
@@ -232,7 +233,7 @@ export default function StudioPage({ onExit }) {
                   <input className="text-input" value={doc.description} maxLength={300} onChange={(e) => actions.meta({ description: e.target.value }, 'wdesc')} /></label>
                 <label className="st-field"><span className="st-label">最大人数(1〜64)</span>
                   <input className="text-input st-num" type="number" min="1" max="64" value={doc.players.max} onChange={(e) => actions.meta({ players: { max: e.target.value } }, 'wmax')} /></label>
-                <label className="st-field"><span className="st-label">ゲームロジック</span>
+                <label className="st-field"><span className="st-label">旧ゲームロジック（互換）</span>
                   <select className="text-input" value={doc.logic?.id || 'none'} onChange={(e) => {
                     const id = e.target.value;
                     actions.meta({ logic: id === 'none' ? null : { id, version: 1, params: getLogicDefaults(id) } }, 'wlogic');
