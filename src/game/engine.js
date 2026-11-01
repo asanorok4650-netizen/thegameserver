@@ -48,7 +48,7 @@ export class Game {
     this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
     this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.ruleTriggerParts = []; this.activeRuleTriggers = new Set();
     this.scriptingWorkspace = null; this.scriptRuntime = null; this.scriptHandlers = {};
-    this.activeTriggers = new Set(); this.completed = false;
+    this.activeTriggers = new Set(); this.activeScriptTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
     this.minY = -500;
@@ -191,6 +191,7 @@ export class Game {
     this.grounded = false;
     this.activeTriggers.clear();
     this.activeRuleTriggers.clear();
+    this.activeScriptTriggers.clear();
   }
 
   restart() {
@@ -216,7 +217,7 @@ export class Game {
   }
 
   _checkTriggers() {
-    if ((!this.logicRuntime && !this.ruleRuntime?.usesContactEvents) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
+    if ((!this.logicRuntime && !this.ruleRuntime?.usesContactEvents && !this.scriptRuntime) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
     const now = new Set();
     for (const trigger of this.world.triggers) {
       let touching = false;
@@ -238,6 +239,18 @@ export class Game {
       if (this.completed) break;
     }
     this.activeTriggers = now;
+    if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
+      const activeScripts = new Set();
+      for (const trigger of this.world.ruleTriggers) {
+        let touching = false;
+        for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
+        if (touching) {
+          activeScripts.add(trigger.id);
+          if (!this.activeScriptTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger);
+        }
+      }
+      this.activeScriptTriggers = activeScripts;
+    }
     if (this.ruleRuntime?.usesContactEvents && this.ruleTriggerParts.length) {
       const active = new Set();
       for (const trigger of this.ruleTriggerParts) {
