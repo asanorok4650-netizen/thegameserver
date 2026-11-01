@@ -73,7 +73,7 @@ export function validateManifest(m) {
   if (m.scripting !== undefined) {
     if (!m.scripting || typeof m.scripting !== 'object' || Array.isArray(m.scripting)) fail('manifest.scripting はオブジェクトにしてください');
     if (m.scripting.version !== 1) fail('manifest.scripting.version は1にしてください');
-    if (m.scripting.workspace !== undefined && (!m.scripting.workspace || typeof m.scripting.workspace !== 'object' || Array.isArray(m.scripting.workspace))) fail('manifest.scripting.workspace はオブジェクトにしてください');
+    if (m.scripting.workspace !== undefined && m.scripting.workspace !== null && (typeof m.scripting.workspace !== 'object' || Array.isArray(m.scripting.workspace))) fail('manifest.scripting.workspace はオブジェクトにしてください');
   }
   if (m.thumbnail !== undefined) { if (typeof m.thumbnail !== 'string') fail('manifest.thumbnail が不正です'); checkEntryPath(m.thumbnail); }
   return m;
