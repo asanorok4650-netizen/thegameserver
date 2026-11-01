@@ -6,6 +6,7 @@ import { createManifest } from '../tgw/manifest.js';
 import { SHAPES } from '../tgw/validate.js';
 import { RULE_FIELDS, ENV_FIELDS, resolveRules, resolveEnvironment, diffFromDefault } from '../game/rules.js';
 import { resolveBehavior, setBehavior } from '../behaviors/index.js';
+import { normalizeEventRules } from '../rules/schema.js';
 
 export const IDENT = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
@@ -18,6 +19,7 @@ export function createDoc(opts = {}) {
     description: opts.description || '',
     players: { max: 8, sendHz: 10, ...(opts.players || {}) },
     logic: opts.logic || null,
+    eventRules: normalizeEventRules(opts.eventRules),
     rules: resolveRules(opts.rules),             // 物理(歩く速さ・ジャンプ力・重力)。常に検証済みの全項目
     environment: resolveEnvironment(opts.environment), // 空・光・霧
     spawns: opts.spawns || [],
@@ -42,6 +44,7 @@ export function normalizeDoc(raw) {
     description: typeof d.description === 'string' ? d.description : '',
     players: d.players,
     logic: d.logic || null,
+    eventRules: d.eventRules,
     rules: d.rules,
     environment: d.environment,
     spawns: Array.isArray(d.spawns) ? d.spawns.map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })) : [],
@@ -69,6 +72,7 @@ export function docFromPackage(pkg, fallbackName = 'Imported World') {
     description: m.description || '',
     players: m.players,
     logic: m.logic || null,
+    eventRules: m.eventRules,
     rules: m.rules,
     environment: w.environment,
     spawns: (w.spawns || []).map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })),
@@ -88,7 +92,7 @@ export function docToPackage(doc, extra = {}) {
   if (env) worldJson.environment = env; // 既定値のままなら書かない
   const manifest = createManifest(worldJson, null, {
     name: doc.name, description: doc.description, author: extra.author || '',
-    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, rules: diffFromDefault(resolveRules(doc.rules), RULE_FIELDS) || undefined
+    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, eventRules: doc.eventRules?.length ? doc.eventRules : undefined, rules: diffFromDefault(resolveRules(doc.rules), RULE_FIELDS) || undefined
   });
   if (doc.source) manifest.source = doc.source;
   return { worldJson, manifest };
@@ -220,6 +224,7 @@ export function setMeta(doc, patch) {
     if (Number.isFinite(hz) && hz > 0 && hz <= 60) next.players.sendHz = hz;
   }
   if (patch.logic !== undefined) next.logic = patch.logic;
+  if (patch.eventRules !== undefined) next.eventRules = normalizeEventRules(patch.eventRules);
   if (patch.publishedId !== undefined) next.publishedId = patch.publishedId;
   return next;
 }
