@@ -8,8 +8,8 @@ function registerBlocks() {
   if (registered) return;
   registered = true;
   const definitions = [
-    { type: 'rbxl_when_start', message0: 'ゲームが始まったとき', hat: 'cap', colour: 25 },
-    { type: 'rbxl_when_touch', message0: 'パーツ %1 に触れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', colour: 25 },
+    { type: 'rbxl_when_start', message0: 'ゲームが始まったとき', hat: 'cap', nextStatement: null, colour: 25 },
+    { type: 'rbxl_when_touch', message0: 'パーツ %1 に触れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_wait', message0: '%1 秒待つ', args0: [{ type: 'input_value', name: 'SECONDS', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 40 },
     { type: 'rbxl_if', message0: 'もし %1 なら %2', args0: [{ type: 'input_value', name: 'CONDITION', check: 'Boolean' }, { type: 'input_statement', name: 'DO' }], previousStatement: null, nextStatement: null, colour: 40 },
     { type: 'rbxl_repeat', message0: '%1 回繰り返す %2', args0: [{ type: 'field_number', name: 'TIMES', value: 10, min: 0, max: 1000, precision: 1 }, { type: 'input_statement', name: 'DO' }], previousStatement: null, nextStatement: null, colour: 40 },
