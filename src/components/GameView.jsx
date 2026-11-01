@@ -66,6 +66,11 @@ export default function GameView({ server, desc, onExit }) {
           onComplete: () => { if (!dead) setCompleted(true); },
           onRestart: () => { if (!dead) setCompleted(false); }
         });
+        game.setScripting(pkg.scripting, {
+          onMessage: (message) => { if (!dead) { setRuleMessage(message); window.setTimeout(() => { if (!dead) setRuleMessage(''); }, 2600); } },
+          onScore: (score) => { if (!dead) setRuleScore(score); },
+          onWarning: (message) => log('warn', message)
+        });
         game.setEventRules(pkg.eventRules, {
           onMessage: (message) => { if (!dead) { setRuleMessage(message); window.setTimeout(() => { if (!dead) setRuleMessage(''); }, 2600); } },
           onScore: (score) => { if (!dead) setRuleScore(score); },
