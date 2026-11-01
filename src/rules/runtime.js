@@ -60,6 +60,8 @@ export function createRuleRuntime(rawRules, api = {}) {
       }
     },
     getScore: () => score,
+    usesContactEvents: rules.some((r) => r.enabled && ['touch', 'leave'].includes(r.event.type)),
+    watchedPartIds: () => { const targets = rules.filter((r) => r.enabled && ['touch', 'leave'].includes(r.event.type)).map((r) => r.event.target).filter(Boolean); return targets.length ? new Set(targets) : null; },
     reset() { timers.clear(); firedOnce.clear(); elapsed = 0; score = 0; stopped = false; api.onScore?.(0, 0); }
   };
 }
