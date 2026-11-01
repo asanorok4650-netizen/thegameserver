@@ -8,7 +8,6 @@ import { LOGICS, getLogicDefinition, getLogicDefaults } from '../logics/index.js
 import FieldForm from './FieldForm.jsx';
 import { BEHAVIOR_LIST, BEHAVIORS, resolveBehavior } from '../behaviors/index.js';
 import { RULE_FIELDS, ENV_FIELDS, defaultRules, defaultEnvironment } from '../game/rules.js';
-import RulesSection from './RulesSection.jsx';
 import BlockEditor from './BlockEditor.jsx';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
@@ -284,10 +283,7 @@ export default function StudioPage({ onExit }) {
                     <button className="secondary-button" type="button" onClick={() => actions.rules(defaultRules())}>既定値に戻す</button>
                   </div>
                 </details>
-                <details className="st-details" open>
-                  <summary>イベントルール（ノーコード）</summary>
-                  <div className="st-logic-config"><RulesSection rules={doc.eventRules || []} parts={doc.parts} onChange={actions.eventRules} /></div>
-                </details>
+                <p className="st-note">イベントルールは上部の「ブロック」画面から編集できます。</p>
                 <details className="st-details">
                   <summary>空・光・霧</summary>
                   <div className="st-logic-config">
