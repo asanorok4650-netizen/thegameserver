@@ -11,6 +11,6 @@ test('touch rule checks score condition and runs actions in order', () => {
 test('interval rule fires after configured duration', () => {
   let count=0;
   const runtime=createRuleRuntime([{id:'timer',event:{type:'interval',seconds:1},actions:[{type:'add_score',value:1}]}],{onScore:()=>count++});
-  runtime.update(.5); runtime.update(.5);
+  for (let i = 0; i < 20; i++) runtime.update(.05);
   assert.equal(count,1);
 });
