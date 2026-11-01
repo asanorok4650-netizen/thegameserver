@@ -1,21 +1,10 @@
-// パース済みツリー(Workspace)→ THREEのシーン + 衝突データ。
+// world.json → THREEのシーン + 衝突データ。
 // 同じ形・同じ透明度のパーツは InstancedMesh にまとめて描画コールを減らす(スマホ向け)。
+// rbxlツリーからの変換(THREE非依存)は ../tgw/worldjson.js の treeToWorldJson に分離した。
 import * as THREE from 'three';
 import { primitiveGeometry, MESH_TYPE } from '../rbx/primitives.js';
-import { brickHex } from '../avatar/rigs.js';
 import { CollisionWorld, wedgePlanes, cornerPlanes } from './collision.js';
-
-const SKIP_ROOTS = new Set(['StarterPlayer', 'StarterGui', 'StarterPack', 'ReplicatedStorage', 'ServerStorage',
-  'ServerScriptService', 'ReplicatedFirst', 'Lighting', 'SoundService', 'Players', 'Teams', 'Chat']);
-const APPROX = new Set(['MeshPart', 'UnionOperation', 'TrussPart']); // 形をSizeの箱で代用するもの
-
-function shapeOf(inst) {
-  const c = inst.className, p = inst.props;
-  if (c === 'WedgePart') return 'wedge';
-  if (c === 'CornerWedgePart') return 'corner';
-  const s = p.shape !== undefined ? p.shape : p.Shape;
-  return s === 0 ? 'ball' : s === 2 ? 'cylinder' : s === 3 ? 'wedge' : s === 4 ? 'corner' : 'block';
-}
+import { treeToWorldJson } from '../tgw/worldjson.js';
 
 function toGeometry(g) {
   const geo = new THREE.BufferGeometry();
@@ -35,44 +24,19 @@ function unitGeometry(shape) {
   }
 }
 
-function colorOf(p) {
-  const c = p.Color3uint8 || p.Color3 || p.Color;
-  if (Array.isArray(c) && c.length === 3) {
-    const f = c.some((v) => v > 1.0001) ? c.map((v) => v / 255) : c;
-    return new THREE.Color().setRGB(f[0], f[1], f[2], THREE.SRGBColorSpace);
-  }
-  return new THREE.Color(brickHex(p.BrickColor));
-}
-
-/** @returns { group, collision, spawn:[x,y,z], stats } */
-export function buildWorld(tree, log = () => {}) {
-  const stats = { parts: 0, drawn: 0, collidable: 0, approx: {}, ignored: {}, spawnFound: false };
-  const ws = [...tree.instances.values()].find((i) => i.className === 'Workspace');
-  const stack = ws ? [...ws.children] : tree.roots.filter((r) => !SKIP_ROOTS.has(r.className));
-  if (!ws) log('warn', 'Workspaceが見つからないため、ルート直下のパーツを使います');
-
-  const parts = [];
-  while (stack.length) {
-    const n = stack.pop();
-    if (n.className === 'Terrain') { stats.ignored.Terrain = (stats.ignored.Terrain || 0) + 1; continue; }
-    if (SKIP_ROOTS.has(n.className)) continue;
-    const size = n.props.Size || n.props.size, cf = n.props.CFrame;
-    if (Array.isArray(size) && cf && cf.pos && cf.rot) parts.push(n);
-    for (const c of n.children) stack.push(c);
-  }
-  stats.parts = parts.length;
-
+/**
+ * @param worldJson 検証済みの world.json
+ * @returns { group, collision, spawn:[x,y,z], stats:{ parts, drawn, collidable, spawnFound } }
+ */
+export function buildSceneFromWorld(worldJson) {
+  const stats = { parts: worldJson.parts.length, drawn: 0, collidable: 0, spawnFound: false };
   const buckets = new Map(); // shape|transparency → { shape, t, list:[{matrix,color}] }
   const collision = new CollisionWorld();
-  const spawns = [];
 
-  for (const n of parts) {
-    const p = n.props, size = p.Size || p.size, cf = p.CFrame;
-    const [sx, sy, sz] = size, m = cf.rot, pos = cf.pos;
-    if (!(sx > 0 && sy > 0 && sz > 0)) continue;
-    if (APPROX.has(n.className)) stats.approx[n.className] = (stats.approx[n.className] || 0) + 1;
-    const shape = shapeOf(n);
-    const t = Math.min(1, Math.max(0, Number(p.Transparency) || 0));
+  for (const p of worldJson.parts) {
+    const [sx, sy, sz] = p.size, m = p.rot, pos = p.pos;
+    const shape = p.shape;
+    const t = Math.min(1, Math.max(0, Number(p.transparency) || 0));
 
     if (t < 0.99) {
       const key = shape + '|' + Math.round(t * 10);
@@ -80,10 +44,10 @@ export function buildWorld(tree, log = () => {}) {
       if (!b) buckets.set(key, (b = { shape, t: Math.round(t * 10) / 10, list: [] }));
       const mat = new THREE.Matrix4().set(m[0], m[1], m[2], pos[0], m[3], m[4], m[5], pos[1], m[6], m[7], m[8], pos[2], 0, 0, 0, 1);
       mat.multiply(new THREE.Matrix4().makeScale(sx, sy, sz));
-      b.list.push({ matrix: mat, color: colorOf(p) });
+      b.list.push({ matrix: mat, color: new THREE.Color(p.color) }); // '#rrggbb' はsRGBとして解釈される
     }
 
-    if (p.CanCollide !== false) {
+    if (p.collide) {
       const base = { pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2] };
       if (shape === 'ball') collision.add({ ...base, type: 'ball', radius: sx / 2 });
       else if (shape === 'wedge') collision.add({ ...base, type: 'convex', planes: wedgePlanes([sx, sy, sz]) });
@@ -91,7 +55,6 @@ export function buildWorld(tree, log = () => {}) {
       else collision.add({ ...base, type: 'box' });
       stats.collidable++;
     }
-    if (n.className === 'SpawnLocation') spawns.push({ pos, size });
   }
 
   const group = new THREE.Group();
@@ -107,8 +70,9 @@ export function buildWorld(tree, log = () => {}) {
     stats.drawn += b.list.length;
   }
 
-  // スポーン位置: SpawnLocation の上 → なければ原点の真上の地面 → なければ全体の上空
+  // スポーン位置: spawns[0] の上 → なければ原点の真上の地面 → なければ全体の上空
   let spawn;
+  const spawns = worldJson.spawns || [];
   if (spawns.length) {
     const s = spawns[0];
     spawn = [s.pos[0], s.pos[1] + s.size[1] / 2 + 0.2, s.pos[2]];
@@ -118,6 +82,15 @@ export function buildWorld(tree, log = () => {}) {
     spawn = top !== null ? [0, top + 0.2, 0] : b ? [(b.min[0] + b.max[0]) / 2, b.max[1] + 10, (b.min[2] + b.max[2]) / 2] : [0, 10, 0];
   }
   return { group, collision, spawn, stats };
+}
+
+/** 従来の呼び出し口(rbxlツリーから直接)。ツリー→world.json→シーンの2段で行う */
+export function buildWorld(tree, log = () => {}) {
+  const { worldJson, report } = treeToWorldJson(tree, log);
+  const world = buildSceneFromWorld(worldJson);
+  world.stats.approx = report.approx;
+  world.stats.ignored = report.ignored;
+  return world;
 }
 
 export function disposeWorld(world) {

@@ -39,7 +39,7 @@ export function describeError(e) {
   if (code === 'API_NOT_CONFIGURED') return '設定ページでAPI URLを入力してください。';
   if (code === 'unauthorized') return '合言葉が違います。';
   if (code === 'too_large') return 'ファイルが大きすぎます(上限100MB)。';
-  if (code === 'bad_format') return '.rbxl / .rbxlx のみ追加できます。';
+  if (code === 'bad_format') return '.tgw / .rbxl / .rbxlx のみ追加できます。';
   if (code === 'name_required') return '名前を入力してください。';
   return 'サーバーAPIに接続できませんでした。URLとWorkerのデプロイを確認してください。';
 }

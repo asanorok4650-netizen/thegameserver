@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Game } from '../game/engine.js';
-import { fetchRbxl, parseRbxl } from '../game/loader.js';
-import { buildWorld } from '../game/world.js';
+import { fetchServerFile, loadWorldPackage } from '../game/loader.js';
+import { buildSceneFromWorld } from '../game/world.js';
 import { buildAvatar } from '../avatar/builder.js';
 import { serverFileUrl } from '../servers/api.js';
 
@@ -32,7 +32,7 @@ export default function GameView({ server, desc, onExit }) {
     (async () => {
       try {
         log('info', `「${server.name}」を取得中…`);
-        const bytes = await fetchRbxl(serverFileUrl(server.id), server.size, (a, b) => { if (!dead) setProgress(`${mb(a)} / ${mb(b)}`); }, ac.signal);
+        const bytes = await fetchServerFile(serverFileUrl(server.id), server.size, (a, b) => { if (!dead) setProgress(`${mb(a)} / ${mb(b)}`); }, ac.signal);
         if (dead) return;
         setProgress('');
         log('ok', `ダウンロード完了(${mb(bytes.length)})`);
@@ -40,21 +40,21 @@ export default function GameView({ server, desc, onExit }) {
 
         log('info', '解析中…');
         await tick();
-        const tree = parseRbxl(bytes);
-        log('ok', `解析完了: インスタンス ${tree.instances.size}個`);
-        for (const w of tree.warnings.slice(0, 5)) log('warn', w);
-        if (tree.warnings.length > 5) log('warn', `ほか警告 ${tree.warnings.length - 5}件`);
+        const pkg = await loadWorldPackage(bytes, log);
+        log('ok', `解析完了: ${pkg.info}`);
+        for (const w of pkg.warnings.slice(0, 5)) log('warn', w);
+        if (pkg.warnings.length > 5) log('warn', `ほか警告 ${pkg.warnings.length - 5}件`);
         await tick();
         if (dead) return;
 
         log('info', 'ワールドを構築中…');
         await tick();
-        const world = buildWorld(tree, log);
+        const world = buildSceneFromWorld(pkg.worldJson);
         const s = world.stats;
         log('ok', `パーツ ${s.parts}個(描画 ${s.drawn} / 衝突 ${s.collidable})`);
         if (!s.spawnFound) log('warn', 'SpawnLocationがありません。原点付近から開始します');
-        for (const [k, v] of Object.entries(s.ignored)) log('warn', `${k} ${v}件は未対応のため表示されません`);
-        for (const [k, v] of Object.entries(s.approx)) log('warn', `${k} ${v}個は箱の形で代用しています`);
+        for (const [k, v] of Object.entries(pkg.report.ignored)) log('warn', `${k} ${v}件は未対応のため表示されません`);
+        for (const [k, v] of Object.entries(pkg.report.approx)) log('warn', `${k} ${v}個は箱の形で代用しています`);
         game.setWorld(world);
 
         log('info', 'キャラクターを配置中…');

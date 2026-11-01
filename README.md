@@ -69,6 +69,13 @@ npx wrangler deploy
 API: `GET /api/servers`(一覧)/ `GET /api/servers/:id/file`(rbxl本体)/ `POST /api/servers`・`DELETE /api/servers/:id`(要合言葉)。
 アップロード上限は100MB(Workersのリクエスト上限)。合言葉はこのブラウザのlocalStorageに保存されます。
 
+### .tgw 形式(thegameserver ワールドパッケージ)
+rbxl に加えて **.tgw**(ZIP。`manifest.json` + `world.json` + 任意の assets/ など)も追加できます。
+読み込みは先頭のバイト列(`PK\x03\x04`)で判別し、rbxl は `treeToWorldJson` で world.json にしてから、
+.tgw は展開・検証してから、同じ `buildSceneFromWorld` でシーン/衝突を作ります。ZIPの展開はブラウザ側(fflate)だけで、Workerは展開しません。
+`src/tgw/`: `worldjson.js`(ツリー→world.json)/ `validate.js`(検証・上限)/ `container.js`(ZIP読み書き)/ `manifest.js`。
+Worker側は `worker/index.js` の `FORMATS` に `'tgw'` を追加してください(`rbxl` / `rbxlx` / `tgw`)。
+
 ## 構成(追加分)
 ```
 src/

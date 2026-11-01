@@ -39,8 +39,8 @@ export default function ServerSettings({ servers, onChanged }) {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     const ext = f.name.split('.').pop().toLowerCase();
-    if (ext !== 'rbxl' && ext !== 'rbxlx') {
-      setMsg({ text: '.rbxl / .rbxlx を選んでください。', kind: 'error' });
+    if (ext !== 'tgw' && ext !== 'rbxl' && ext !== 'rbxlx') {
+      setMsg({ text: '.tgw / .rbxl / .rbxlx を選んでください。', kind: 'error' });
       e.target.value = '';
       return;
     }
@@ -50,7 +50,7 @@ export default function ServerSettings({ servers, onChanged }) {
       return;
     }
     setFile(f);
-    if (!name) setName(f.name.replace(/\.(rbxlx?|RBXLX?)$/, ''));
+    if (!name) setName(f.name.replace(/\.(tgw|rbxlx?)$/i, ''));
     setMsg({ text: '', kind: '' });
   }
 
@@ -115,7 +115,7 @@ export default function ServerSettings({ servers, onChanged }) {
           value={name} onChange={(e) => setName(e.target.value)} />
         <input className="text-input" placeholder="説明(任意)" maxLength={300}
           value={description} onChange={(e) => setDescription(e.target.value)} />
-        <input ref={fileRef} className="text-input" type="file" accept=".rbxl,.rbxlx" onChange={pickFile} />
+        <input ref={fileRef} className="text-input" type="file" accept=".tgw,.rbxl,.rbxlx" onChange={pickFile} />
         <div className="button-row">
           <button className="primary-button" type="button" disabled={busy} onClick={add}>追加</button>
         </div>
