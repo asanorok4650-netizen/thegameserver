@@ -2,6 +2,7 @@
 const clamp = (n) => Number.isFinite(n) ? Math.max(-1e9, Math.min(1e9, n)) : 0;
 const MAX_TASKS = 64;
 const MAX_STEPS_PER_TICK = 200;
+const MAX_WORK_PER_TICK = 4000; // 1フレームで進められる「ブロック実行 + 繰り返し1周」の合計。空の入れ子ループでも画面が固まらない
 const MAX_REPEAT = 100;
 
 export function createBlocklyRuntime(program, api = {}) {
@@ -9,7 +10,9 @@ export function createBlocklyRuntime(program, api = {}) {
   const tasks = [];
   const intervals = new Map();
   let score = 0, elapsed = 0, stopped = false;
+  let work = MAX_WORK_PER_TICK;
   const read = (node) => {
+    if (typeof node === 'number') return Number.isFinite(node) ? node : 0;
     if (!node || typeof node !== 'object') return 0;
     if (node.op === 'number') return Number(node.value) || 0;
     if (node.op === 'boolean') return !!node.value;
@@ -31,12 +34,18 @@ export function createBlocklyRuntime(program, api = {}) {
     if (depth > 24) return;
     for (const step of steps || []) {
       if (stopped) return;
+      while (work <= 0 && !stopped) yield 0; // 今のフレームの作業量を使い切ったら、次のフレームまで譲る
+      work--;
       switch (step.op) {
         case 'wait': yield Math.max(0, Math.min(60, Number(read(step.seconds)) || 0)); break;
         case 'if': yield 0; yield* runSteps(read(step.condition) ? step.then : step.otherwise, depth+1); break;
         case 'repeat': {
           const n = Math.max(0, Math.min(MAX_REPEAT, Math.floor(Number(read(step.times)) || 0)));
-          for (let i=0; i<n && !stopped; i++) yield* runSteps(step.body, depth+1);
+          for (let i=0; i<n && !stopped; i++) {
+            while (work <= 0 && !stopped) yield 0; // 中身が空でも1周ごとに作業量を消費する
+            work--;
+            yield* runSteps(step.body, depth+1);
+          }
           break;
         }
         case 'forever':
@@ -76,6 +85,7 @@ export function createBlocklyRuntime(program, api = {}) {
         if (next >= item.seconds) { intervals.set(item, next % item.seconds); if (tasks.length < MAX_TASKS) tasks.push({ iterator: runSteps(item.body), wake: elapsed }); }
         else intervals.set(item, next);
       }
+      work = MAX_WORK_PER_TICK;
       let budget = MAX_STEPS_PER_TICK;
       for (let i=tasks.length-1; i>=0 && budget>0; i--) {
         const task = tasks[i];
@@ -87,7 +97,7 @@ export function createBlocklyRuntime(program, api = {}) {
       }
       if (tasks.length > MAX_TASKS) tasks.length = MAX_TASKS;
     },
-    reset() { tasks.length = 0; intervals.clear(); variables.clear(); variables.set('score',0); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
+    reset() { tasks.length = 0; intervals.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
     getScore: () => score,
     getVariables: () => Object.fromEntries(variables),
     stop() { stopped = true; tasks.length = 0; }

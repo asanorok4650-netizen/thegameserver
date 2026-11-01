@@ -37,12 +37,13 @@ test('variables can be initialized, changed, and used in expressions', () => {
   const runtime = createRuleRuntime([{
     id: 'vars', variables: [{ name: 'coins', initial: 2 }],
     event: { type: 'game_start' }, actions: [
-      { type: 'change_variable', name: 'coins', expression: { kind: 'math', op: 'add', left: { kind: 'variable', name: 'coins' }, right: { kind: 'number', value: 5 } } },
-      { type: 'add_score', expression: { kind: 'variable', name: 'coins' } }
+      { type: 'change_variable', name: 'coins', expression: { kind: 'number', value: 5 } },
+      { type: 'add_score', expression: { kind: 'variable', name: 'coins' } },
+      { type: 'set_variable', name: 'coins', expression: { kind: 'math', op: 'mul', left: { kind: 'variable', name: 'coins' }, right: { kind: 'number', value: 2 } } }
     ]
   }], { onScore: (v) => scores.push(v) });
   runtime.start();
-  assert.equal(runtime.getVariable('coins'), 7);
+  assert.equal(runtime.getVariable('coins'), 14, 'change_variable は加算、set_variable は式の結果で置き換え');
   assert.equal(runtime.getScore(), 7);
   assert.deepEqual(scores, [7]);
 });
@@ -58,7 +59,7 @@ test('IF/ELSE and REPEAT execute nested blocks in order', () => {
           then: [{ type: 'add_score', expression: { kind: 'variable', name: 'coins' } }],
           else: [{ type: 'show_message', text: 'まだ' }] }
       ] },
-      { type: 'show_message', text: 'coins={coins}, gems={gems}' }
+      { type: 'show_message', text: 'coins={coins}' }
     ]
   }], { onMessage: (message) => messages.push(message) });
   runtime.start();
@@ -69,7 +70,7 @@ test('IF/ELSE and REPEAT execute nested blocks in order', () => {
 
 test('save validation rejects undeclared, duplicate, and malformed variable names', () => {
   const errors = validateEventRules([{
-    event: { type: 'game_start' }, actions: [{ type: 'show_message', text: 'coins={coins}' }],
+    event: { type: 'game_start' }, actions: [{ type: 'show_message', text: 'gems={gems}' }],
     variables: [{ name: 'bad name', initial: 0 }, { name: 'coins', initial: 0 }, { name: 'coins', initial: 1 }]
   }]);
   assert.ok(errors.some((error) => error.includes('変数名')));

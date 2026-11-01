@@ -52,11 +52,21 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_wait': out.push({ op: 'wait', seconds: value(block, 'SECONDS', depth) }); break;
         case 'rbxl_if':
         case 'rbxl_if_else':
-        case 'controls_if':
-          out.push({ op: 'if', condition: value(block, 'CONDITION', depth), then: sequence(child('DO') || child('DO0'), depth + 1), otherwise: sequence(child('ELSE'), depth + 1) }); break;
+          out.push({ op: 'if', condition: value(block, 'CONDITION', depth), then: sequence(child('DO'), depth + 1), otherwise: sequence(child('ELSE'), depth + 1) }); break;
+        case 'controls_if': {
+          // 標準の「もし」: IF0/DO0, IF1/DO1(でなければもし)…, ELSE。後ろから入れ子の if/otherwise に畳む。
+          const branches = [];
+          for (let i = 0; i < 32 && (inputs['IF' + i] || inputs['DO' + i]); i++) branches.push(i);
+          let tail = sequence(child('ELSE'), depth + 1);
+          for (let k = branches.length - 1; k >= 0; k--) {
+            const i = branches[k];
+            tail = [{ op: 'if', condition: value(block, 'IF' + i, depth), then: sequence(child('DO' + i), depth + 1), otherwise: tail }];
+          }
+          out.push(...tail); break;
+        }
         case 'rbxl_repeat':
         case 'controls_repeat_ext':
-          out.push({ op: 'repeat', times: block.type === 'rbxl_repeat' ? Number(field(block, 'TIMES', 0)) : value(block, 'TIMES', depth), body: sequence(child('DO'), depth + 1) }); break;
+          out.push({ op: 'repeat', times: block.type === 'rbxl_repeat' ? { op: 'number', value: Number(field(block, 'TIMES', 0)) || 0 } : value(block, 'TIMES', depth), body: sequence(child('DO'), depth + 1) }); break;
         case 'rbxl_forever': out.push({ op: 'forever', body: sequence(child('DO'), depth + 1) }); break;
         case 'rbxl_add_score': out.push({ op: 'addScore', amount: value(block, 'VALUE', depth) }); break;
         case 'rbxl_show_message': out.push({ op: 'message', text: String(field(block, 'TEXT', '')).slice(0, MAX_TEXT) }); break;
