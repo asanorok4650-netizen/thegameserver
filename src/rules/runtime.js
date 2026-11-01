@@ -1,4 +1,4 @@
-import { normalizeEventRules } from './schema.js';
+import { normalizeEventRules, RULE_LIMITS } from './schema.js';
 
 /** Deterministic, data-only rule runner. Expressions are bounded ASTs; JSON is never executed as code. */
 export function createRuleRuntime(rawRules, api = {}) {
@@ -44,35 +44,56 @@ export function createRuleRuntime(rawRules, api = {}) {
     }
     return 0;
   };
+
   const conditionsPass = (rule) => {
     if (rule.conditionTree && !Boolean(evaluate(rule.conditionTree))) return false;
-    return rule.conditions.every((c) => c.type !== 'score_compare' ||
+    return (rule.conditions || []).every((c) => c.type !== 'score_compare' ||
       (c.op === 'lte' ? score <= c.value : c.op === 'eq' ? score === c.value : score >= c.value));
   };
+
+  const executeAction = (action, rule) => {
+    switch (action.type) {
+      case 'add_score': {
+        const amount = action.expression ? Number(evaluate(action.expression)) || 0 : action.value;
+        score += amount; variables.set('score', score); api.onScore?.(score, amount); break;
+      }
+      case 'set_variable': variables.set(action.name, Number(evaluate(action.expression)) || 0); break;
+      case 'change_variable': variables.set(action.name, (variables.get(action.name) || 0) + (Number(evaluate(action.expression)) || 0)); break;
+      case 'show_message': api.onMessage?.(action.text.replace(/\{([a-zA-Z0-9_ぁ-んァ-ヶ一-龠]+)\}/g, (_, name) => String(variables.get(name) ?? 0))); break;
+      case 'teleport':
+      case 'set_checkpoint': {
+        const target = parts.get(action.target);
+        if (!target) { api.onWarning?.('ルール「' + rule.id + '」: 対象パーツ ' + action.target + ' が見つかりません'); break; }
+        const position = [target.pos[0], target.pos[1] + target.size[1] / 2 + 0.2, target.pos[2]];
+        if (action.type === 'teleport') api.teleport?.(position); else api.setCheckpoint?.(position);
+        break;
+      }
+      case 'respawn': api.respawn?.(); break;
+      case 'complete': stopped = true; api.complete?.(); break;
+    }
+  };
+
+  const executeSteps = (steps, rule, budget, depth = 0) => {
+    if (depth > RULE_LIMITS.maxStepDepth || stopped) return;
+    for (const step of steps || []) {
+      if (stopped || budget.remaining <= 0) break;
+      budget.remaining--;
+      if (step.type === 'if') {
+        executeSteps(Boolean(evaluate(step.condition)) ? step.then : step.else, rule, budget, depth + 1);
+      } else if (step.type === 'repeat') {
+        const count = Math.min(RULE_LIMITS.maxRepeat, Math.max(0, Math.floor(step.count || 0)));
+        for (let i = 0; i < count && !stopped && budget.remaining > 0; i++) {
+          executeSteps(step.body, rule, budget, depth + 1);
+        }
+      } else executeAction(step, rule);
+    }
+  };
+
   const runActions = (rule) => {
     if (stopped || !conditionsPass(rule)) return;
-    for (const action of rule.actions) {
-      switch (action.type) {
-        case 'add_score': {
-          const amount = action.expression ? Number(evaluate(action.expression)) || 0 : action.value;
-          score += amount; variables.set('score', score); api.onScore?.(score, amount); break;
-        }
-        case 'set_variable': variables.set(action.name, Number(evaluate(action.expression)) || 0); break;
-        case 'change_variable': variables.set(action.name, (variables.get(action.name) || 0) + (Number(evaluate(action.expression)) || 0)); break;
-        case 'show_message': api.onMessage?.(action.text.replace(/\{([a-zA-Z0-9_ぁ-んァ-ヶ一-龠]+)\}/g, (_, name) => String(variables.get(name) ?? 0))); break;
-        case 'teleport':
-        case 'set_checkpoint': {
-          const target = parts.get(action.target);
-          if (!target) { api.onWarning?.(`ルール「${rule.id}」: 対象パーツ ${action.target} が見つかりません`); break; }
-          const position = [target.pos[0], target.pos[1] + target.size[1] / 2 + 0.2, target.pos[2]];
-          if (action.type === 'teleport') api.teleport?.(position); else api.setCheckpoint?.(position);
-          break;
-        }
-        case 'respawn': api.respawn?.(); break;
-        case 'complete': stopped = true; api.complete?.(); break;
-      }
-      if (stopped) break;
-    }
+    const budget = { remaining: 500 };
+    executeSteps(Array.isArray(rule.steps) ? rule.steps : rule.actions, rule, budget);
+    if (budget.remaining <= 0) api.onWarning?.('ルール「' + rule.id + '」: 1回の実行で処理できるブロック数の上限に達しました');
   };
   const matching = (type, target) => rules.filter((r) => r.enabled && r.event.type === type && (!r.event.target || r.event.target === target));
   return {
