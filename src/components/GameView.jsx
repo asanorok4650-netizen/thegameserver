@@ -62,7 +62,7 @@ export default function GameView({ server, desc, onExit }) {
         if (!s.spawnFound) log('warn', 'SpawnLocationがありません。原点付近から開始します');
         for (const [k, v] of Object.entries(pkg.report.ignored)) log('warn', `${k} ${v}件は未対応のため表示されません`);
         for (const [k, v] of Object.entries(pkg.report.approx)) log('warn', `${k} ${v}個は箱の形で代用しています`);
-        game.setLogic(pkg.eventRules?.length ? null : pkg.logic, {
+        game.setLogic(pkg.logic, {
           onComplete: () => { if (!dead) setCompleted(true); },
           onRestart: () => { if (!dead) setCompleted(false); }
         });
