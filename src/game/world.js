@@ -4,6 +4,9 @@ import * as THREE from 'three';
 import { primitiveGeometry, MESH_TYPE } from '../rbx/primitives.js';
 import { CollisionWorld, wedgePlanes, cornerPlanes } from './collision.js';
 import { treeToWorldJson } from '../tgw/worldjson.js';
+import { resolveBehavior, isMotion } from '../behaviors/index.js';
+import { Dynamics } from './dynamics.js';
+import { resolveEnvironment } from './rules.js';
 
 function toGeometry(g) {
   const geo = new THREE.BufferGeometry();
@@ -13,7 +16,7 @@ function toGeometry(g) {
   return geo;
 }
 
-function unitGeometry(shape) {
+export function unitGeometry(shape) {
   switch (shape) {
     case 'ball': return new THREE.SphereGeometry(0.5, 20, 14);
     case 'cylinder': { const g = new THREE.CylinderGeometry(0.5, 0.5, 1, 24); g.rotateZ(Math.PI / 2); return g; }
@@ -24,10 +27,13 @@ function unitGeometry(shape) {
 }
 
 export function buildSceneFromWorld(worldJson) {
-  const stats = { parts: worldJson.parts.length, drawn: 0, collidable: 0, triggers: 0, spawnFound: false };
+  const stats = { parts: worldJson.parts.length, drawn: 0, collidable: 0, triggers: 0, spawnFound: false, dynamic: 0, effects: 0 };
   const buckets = new Map();
   const collision = new CollisionWorld();
   const triggers = [];
+  const dynamics = new Dynamics(collision);
+  const slots = new Map(); // partId → { key, i }(動くパーツの見た目を更新するため)
+  const pending = [];
 
   for (const p of worldJson.parts) {
     const [sx, sy, sz] = p.size, m = p.rot, pos = p.pos;
@@ -37,30 +43,44 @@ export function buildSceneFromWorld(worldJson) {
     if (t < 0.99) {
       const key = shape + '|' + Math.round(t * 10);
       let b = buckets.get(key);
-      if (!b) buckets.set(key, (b = { shape, t: Math.round(t * 10) / 10, list: [] }));
+      if (!b) buckets.set(key, (b = { key, shape, t: Math.round(t * 10) / 10, list: [] }));
       const mat = new THREE.Matrix4().set(m[0], m[1], m[2], pos[0], m[3], m[4], m[5], pos[1], m[6], m[7], m[8], pos[2], 0, 0, 0, 1);
       mat.multiply(new THREE.Matrix4().makeScale(sx, sy, sz));
+      slots.set(p.id, { key, i: b.list.length });
       b.list.push({ matrix: mat, color: new THREE.Color(p.color) });
     }
 
+    const behavior = resolveBehavior(p.attrs);
     const tags = Array.isArray(p.tags) ? p.tags.filter((tag) => typeof tag === 'string' && tag) : [];
+    let trigger = null;
     if (tags.length) {
-      triggers.push({ id: p.id, name: p.name, tags, pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2] });
+      trigger = { id: p.id, name: p.name, tags, pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2] };
+      triggers.push(trigger);
       stats.triggers++;
     }
+    let item = null;
 
     if (p.collide) {
       const base = { pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2] };
-      if (shape === 'ball') collision.add({ ...base, type: 'ball', radius: sx / 2 });
-      else if (shape === 'wedge') collision.add({ ...base, type: 'convex', planes: wedgePlanes([sx, sy, sz]) });
-      else if (shape === 'corner') collision.add({ ...base, type: 'convex', planes: cornerPlanes([sx, sy, sz]) });
-      else collision.add({ ...base, type: 'box' });
+      if (shape === 'ball') item = { ...base, type: 'ball', radius: sx / 2 };
+      else if (shape === 'wedge') item = { ...base, type: 'convex', planes: wedgePlanes([sx, sy, sz]) };
+      else if (shape === 'corner') item = { ...base, type: 'convex', planes: cornerPlanes([sx, sy, sz]) };
+      else item = { ...base, type: 'box' };
+      if (behavior && behavior.id === 'bounce') { item.effect = { type: 'bounce', power: behavior.params.power }; stats.effects++; }
+      if (behavior && behavior.id === 'conveyor') { item.effect = { type: 'conveyor', speed: behavior.params.speed }; stats.effects++; }
+      collision.add(item);
       stats.collidable++;
+    }
+    if (isMotion(behavior)) {
+      const entry = dynamics.add({ base: { pos: pos.slice(), rot: m.slice() }, behavior, item, trigger, size: [sx, sy, sz], id: p.id });
+      pending.push(entry);
+      stats.dynamic++;
     }
   }
 
   const group = new THREE.Group();
   group.name = 'World';
+  const meshes = new Map();
   for (const b of buckets.values()) {
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: b.t > 0, opacity: 1 - b.t, depthWrite: b.t === 0 });
     const mesh = new THREE.InstancedMesh(unitGeometry(b.shape), mat, b.list.length);
@@ -69,7 +89,21 @@ export function buildSceneFromWorld(worldJson) {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.frustumCulled = false;
     group.add(mesh);
+    meshes.set(b.key, mesh);
     stats.drawn += b.list.length;
+  }
+  const tmp = new THREE.Matrix4(), scl = new THREE.Matrix4();
+  for (const e of pending) {
+    const slot = slots.get(e.id);
+    if (!slot) continue;
+    const mesh = meshes.get(slot.key);
+    e.apply = (pose) => {
+      const r = pose.rot, q = pose.pos;
+      tmp.set(r[0], r[1], r[2], q[0], r[3], r[4], r[5], q[1], r[6], r[7], r[8], q[2], 0, 0, 0, 1);
+      tmp.multiply(scl.makeScale(e.size[0], e.size[1], e.size[2]));
+      mesh.setMatrixAt(slot.i, tmp);
+      mesh.instanceMatrix.needsUpdate = true;
+    };
   }
 
   let spawn;
@@ -82,7 +116,7 @@ export function buildSceneFromWorld(worldJson) {
     const top = collision.highestTopAt(0, 0), b = collision.bounds();
     spawn = top !== null ? [0, top + 0.2, 0] : b ? [(b.min[0] + b.max[0]) / 2, b.max[1] + 10, (b.min[2] + b.max[2]) / 2] : [0, 10, 0];
   }
-  return { group, collision, triggers, spawn, stats };
+  return { group, collision, triggers, dynamics, environment: resolveEnvironment(worldJson.environment), spawn, stats };
 }
 
 export function buildWorld(tree, log = () => {}) {

@@ -63,6 +63,7 @@ export function validateManifest(m) {
     if (m.logic.version !== undefined && !Number.isInteger(m.logic.version)) fail('manifest.logic.version は整数にしてください');
     if (m.logic.params !== undefined && (typeof m.logic.params !== 'object' || m.logic.params === null || Array.isArray(m.logic.params))) fail('manifest.logic.params はオブジェクトにしてください');
   }
+  if (m.rules !== undefined && (typeof m.rules !== 'object' || m.rules === null || Array.isArray(m.rules))) fail('manifest.rules はオブジェクトにしてください');
   if (m.thumbnail !== undefined) { if (typeof m.thumbnail !== 'string') fail('manifest.thumbnail が不正です'); checkEntryPath(m.thumbnail); }
   return m;
 }
@@ -94,6 +95,7 @@ export function validateWorld(w, manifest) {
     if (p.tags !== undefined && !(Array.isArray(p.tags) && p.tags.every((t) => typeof t === 'string'))) fail(`${at}.tags は文字列の配列にしてください`);
     if (p.attrs !== undefined && (typeof p.attrs !== 'object' || p.attrs === null || Array.isArray(p.attrs))) fail(`${at}.attrs はオブジェクトにしてください`);
   });
+  if (w.environment !== undefined && (typeof w.environment !== 'object' || w.environment === null || Array.isArray(w.environment))) fail('world.environment はオブジェクトにしてください');
   const spawns = w.spawns === undefined ? [] : w.spawns;
   if (!Array.isArray(spawns)) fail('world.spawns が不正です');
   spawns.forEach((s, i) => {

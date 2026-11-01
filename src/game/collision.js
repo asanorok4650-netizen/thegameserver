@@ -47,7 +47,7 @@ function closestSegmentAabb(a, b, h) {
   const sample = (t) => {
     const p = at(t), q = p.map((v, i) => clamp(v, h[i]));
     const d = [p[0]-q[0], p[1]-q[1], p[2]-q[2]];
-    return { p, q, d2: d[0]*d[0]+d[1]*d[1]+d[2]*d[2] };
+    return { p, q, d, d2: d[0]*d[0]+d[1]*d[1]+d[2]*d[2] };
   };
   let lo = 0, hi = 1;
   for (let i = 0; i < 24; i++) {
@@ -78,14 +78,32 @@ export class CollisionWorld {
     this.stamp = 0;
     this.maxNy = -1;
     this.minNy = 1;
+    this.groundItem = null; // 直近の pushOutCapsule で「足場」になった衝突体(法線が上向き)
+    this.lastNy = -1;
   }
 
-  add(c) {
-    const R = c.rot, h = c.half, p = c.pos;
-    const e = c.type === 'ball' ? [c.radius, c.radius, c.radius] : [
+  static _extents(c) {
+    const R = c.rot, h = c.half;
+    return c.type === 'ball' ? [c.radius, c.radius, c.radius] : [
       Math.abs(R[0]) * h[0] + Math.abs(R[1]) * h[1] + Math.abs(R[2]) * h[2],
       Math.abs(R[3]) * h[0] + Math.abs(R[4]) * h[1] + Math.abs(R[5]) * h[2],
       Math.abs(R[6]) * h[0] + Math.abs(R[7]) * h[1] + Math.abs(R[8]) * h[2]];
+  }
+
+  /**
+   * 動く床などのために、登録済みの衝突体の位置・向きを更新する。
+   * 注意: 空間グリッド(旧 pushOut 用)には再登録しない。エンジンが使う pushOutCapsule は items を直接走査するので影響しない。
+   */
+  moveItem(c, pos, rot) {
+    c.pos[0] = pos[0]; c.pos[1] = pos[1]; c.pos[2] = pos[2];
+    if (rot) for (let i = 0; i < 9; i++) c.rot[i] = rot[i];
+    const e = CollisionWorld._extents(c);
+    for (let k = 0; k < 3; k++) { c.min[k] = c.pos[k] - e[k]; c.max[k] = c.pos[k] + e[k]; }
+  }
+
+  add(c) {
+    const p = c.pos;
+    const e = CollisionWorld._extents(c);
     c.min = [p[0] - e[0], p[1] - e[1], p[2] - e[2]];
     c.max = [p[0] + e[0], p[1] + e[1], p[2] + e[2]];
     c.stamp = 0;
@@ -132,7 +150,7 @@ export class CollisionWorld {
 
   /** プレイヤーを1本の垂直カプセルとして衝突解決する。pは足元、yBottom/yTopは軸線の高さ。 */
   pushOutCapsule(p, radius, yBottom, yTop) {
-    this.maxNy = -1; this.minNy = 1;
+    this.maxNy = -1; this.minNy = 1; this.groundItem = null; let groundNy = 0.5;
     let any = false;
     for (let iter = 0; iter < 8; iter++) {
       let hit = false;
@@ -147,13 +165,19 @@ export class CollisionWorld {
           const d = Math.hypot(dx,dy,dz), depth = radius + c.radius - d;
           if (depth <= 0) continue;
           const nx = d > 1e-8 ? dx/d : 0, ny = d > 1e-8 ? dy/d : 1, nz = d > 1e-8 ? dz/d : 0;
-          this._apply(p,nx,ny,nz,depth); hit = true; continue;
+          this._apply(p,nx,ny,nz,depth); hit = true;
+          if (ny > groundNy) { groundNy = ny; this.groundItem = c; }
+          continue;
         }
         if (c.type === 'convex') {
           // 楔形は上下端と中央の3点でカプセルを近似し、既存の凸形状判定を利用する。
           for (const y of [yBottom, (yBottom+yTop)/2, yTop]) {
             const point = [p[0],p[1]+y,p[2]];
-            if (this._test(c,point,radius)) { p[0] += point[0]-p[0]; p[1] += point[1]-y; p[2] += point[2]-p[2]; hit = true; }
+            this.lastNy = -1;
+            if (this._test(c,point,radius)) {
+              p[0] += point[0]-p[0]; p[1] += point[1]-y; p[2] += point[2]-p[2]; hit = true;
+              if (this.lastNy > groundNy) { groundNy = this.lastNy; this.groundItem = c; }
+            }
           }
           continue;
         }
@@ -168,6 +192,7 @@ export class CollisionWorld {
         const ny=R[3]*n[0]+R[4]*n[1]+R[5]*n[2];
         const nz=R[6]*n[0]+R[7]*n[1]+R[8]*n[2];
         this._apply(p,nx,ny,nz,depth); hit=true;
+        if (ny > groundNy) { groundNy = ny; this.groundItem = c; }
       }
       if (!hit) break;
       any=true;
@@ -192,6 +217,7 @@ export class CollisionWorld {
 
   _apply(p, nx, ny, nz, depth) {
     p[0] += nx * depth; p[1] += ny * depth; p[2] += nz * depth;
+    this.lastNy = ny;
     if (ny > this.maxNy) this.maxNy = ny;
     if (ny < this.minNy) this.minNy = ny;
     return true;

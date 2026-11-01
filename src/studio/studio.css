@@ -68,3 +68,12 @@
 .st-tag-option input{accent-color:#335cff}
 .st-tag-option span{display:grid;gap:2px}
 .st-tag-option small{font-size:10px;color:#858793}
+
+/* 物理・環境・振る舞いの折りたたみ */
+.st-details{border:1px solid #e8eaf0;border-radius:10px;background:#fff;overflow:hidden}
+.st-details>summary{padding:11px 12px;font:700 12px inherit;color:#4c4e58;cursor:pointer;list-style:none}
+.st-details>summary::-webkit-details-marker{display:none}
+.st-details>summary::after{content:"＋";float:right;color:#92939c}
+.st-details[open]>summary::after{content:"－"}
+.st-details>.st-logic-config{margin:0 10px 10px}
+.st-slide2{grid-template-columns:1fr 76px}

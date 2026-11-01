@@ -6,7 +6,7 @@ export const MANIFEST_FORMAT_VERSION = '1.0';
 /**
  * @param worldJson treeToWorldJson の worldJson
  * @param report    treeToWorldJson の report(source.ignored / approx に記録)
- * @param opts      { name, description, author, generator, logic:{id,version,params}, players:{max,sendHz}, sourceName }
+ * @param opts      { name, description, author, generator, logic:{id,version,params}, rules:{walkSpeed,jumpPower,gravity}, players:{max,sendHz}, sourceName }
  */
 export function createManifest(worldJson, report, opts = {}) {
   const manifest = {
@@ -19,6 +19,7 @@ export function createManifest(worldJson, report, opts = {}) {
     players: { max: 8, sendHz: 10, ...(opts.players || {}) },
     world: { file: 'world.json', partCount: worldJson.parts.length, bounds: worldBounds(worldJson) }
   };
+  if (opts.rules && Object.keys(opts.rules).length) manifest.rules = { ...opts.rules }; // 既定値と違う項目だけ(game/rules.js の diffFromDefault)
   if (opts.logic) manifest.logic = { version: 1, params: {}, ...opts.logic };
   if (report) {
     manifest.source = { kind: 'rbxl', name: opts.sourceName || '', ignored: report.ignored || {}, approx: report.approx || {} };

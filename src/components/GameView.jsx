@@ -63,6 +63,7 @@ export default function GameView({ server, desc, onExit }) {
           onComplete: () => { if (!dead) setCompleted(true); },
           onRestart: () => { if (!dead) setCompleted(false); }
         });
+        game.setRules(pkg.manifest?.rules);
         game.setWorld(world);
 
         log('info', 'キャラクターを配置中…');
