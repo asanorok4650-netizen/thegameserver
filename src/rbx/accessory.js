@@ -1,11 +1,24 @@
 // パース済みrbxmツリーから、アクセサリ(Handle・メッシュ参照・アタッチメント)を取り出す。THREE非依存。
 import { BODY_ATTACH } from '../avatar/rigs.js';
+import { MESH_TYPE } from './primitives.js';
 
 /** "rbxassetid://123" / "http://www.roblox.com/asset/?id=123" / ".../asset/123" → 123 */
 export function parseAssetUri(s) {
   if (typeof s !== 'string' || !s) return null;
   const m = s.match(/rbxassetid:\/\/(\d+)/) || s.match(/[?&]id=(\d+)/) || s.match(/\/asset\/(\d+)/);
   return m ? Number(m[1]) : null;
+}
+
+/**
+ * SpecialMesh の読み取り。MeshType 未指定(既定=Brick)でも MeshId があれば FileMesh とみなす。
+ * @returns { meshType, meshUri, textureUri, scale, offset }
+ */
+export function readSpecialMesh(sm) {
+  const pr = sm.props;
+  const meshUri = pr.MeshId || pr.MeshContent || null;
+  const meshType = Number.isInteger(pr.MeshType) ? pr.MeshType : (parseAssetUri(meshUri) ? MESH_TYPE.FileMesh : MESH_TYPE.Brick);
+  return { meshType, meshUri, textureUri: pr.TextureId || pr.TextureID || pr.TextureContent || null,
+    scale: pr.Scale || [1, 1, 1], offset: pr.Offset || [0, 0, 0] };
 }
 
 const IDENT = [1, 0, 0, 0, 1, 0, 0, 0, 1];
@@ -16,7 +29,7 @@ const asColor = (p) => {
 };
 
 /**
- * @returns null | { name, handle:{kind:'meshpart'|'special', size, meshUri, textureUri, scale, offset, color, transparency},
+ * @returns null | { name, handle:{kind:'meshpart'|'special', meshType(specialのみ), size, meshUri, textureUri, scale, offset, color, transparency},
  *                   attachment:{name,pos,rot}|null }
  */
 export function extractAccessory(tree) {
@@ -35,10 +48,7 @@ export function extractAccessory(tree) {
     const sm = handle.children.find((c) => c.className === 'SpecialMesh');
     if (!sm) return null;
     h.kind = 'special';
-    h.meshUri = sm.props.MeshId || sm.props.MeshContent || null;
-    h.textureUri = sm.props.TextureId || sm.props.TextureID || sm.props.TextureContent || null;
-    h.scale = sm.props.Scale || [1, 1, 1];
-    h.offset = sm.props.Offset || [0, 0, 0];
+    Object.assign(h, readSpecialMesh(sm));
   }
 
   const atts = handle.children.filter((c) => c.className === 'Attachment');

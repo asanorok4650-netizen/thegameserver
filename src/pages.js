@@ -3,7 +3,7 @@ export const PAGES = {
   home: {
     title: 'ホーム',
     subtitle: 'お気に入りのワールドに戻ろう。',
-    sections: ['recent', 'library']
+    sections: ['servers']
   },
   discover: {
     title: '探索',
@@ -14,11 +14,6 @@ export const PAGES = {
     title: 'フレンド',
     subtitle: '一緒に遊ぶ仲間を見つけよう。',
     sections: ['friends']
-  },
-  recent: {
-    title: '最近プレイしたゲーム',
-    subtitle: '最近開いたワールド。',
-    sections: ['recent']
   },
   avatar: {
     title: 'アバター',
@@ -36,7 +31,6 @@ export const NAV_ITEMS = [
   { page: 'home', icon: 'home', label: 'ホーム' },
   { page: 'discover', icon: 'compass', label: '探索' },
   { page: 'friends', icon: 'users', label: 'フレンド' },
-  { page: 'recent', icon: 'clock', label: '最近プレイしたゲーム' },
   { page: 'avatar', icon: 'user', label: 'アバター' },
   { page: 'settings', icon: 'settings', label: '設定' }
 ];
