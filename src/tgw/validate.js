@@ -67,10 +67,8 @@ export function validateManifest(m) {
   if (m.rules !== undefined && (typeof m.rules !== 'object' || m.rules === null || Array.isArray(m.rules))) fail('manifest.rules はオブジェクトにしてください');
   if (m.eventRules !== undefined) {
     if (!Array.isArray(m.eventRules) || m.eventRules.length > 100) fail('manifest.eventRules は100件以内の配列にしてください');
-    for (const [i, rule] of m.eventRules.entries()) {
-      if (!rule || typeof rule !== 'object' || !rule.event || typeof rule.event.type !== 'string' || !Array.isArray(rule.actions) || rule.actions.length > 10) fail(`manifest.eventRules[${i}] が不正です`);
-      if (rule.conditions !== undefined && (!Array.isArray(rule.conditions) || rule.conditions.length > 5)) fail(`manifest.eventRules[${i}].conditions が不正です`);
-    }
+    const errors = validateEventRules(m.eventRules);
+    if (errors.length) fail(errors[0]);
   }
   if (m.thumbnail !== undefined) { if (typeof m.thumbnail !== 'string') fail('manifest.thumbnail が不正です'); checkEntryPath(m.thumbnail); }
   return m;
