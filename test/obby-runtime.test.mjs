@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import { createLogicRuntime, resolveLogicConfig } from '../src/logics/index.js';
+import { sphereIntersectsOBB } from '../src/game/collision.js';
+
+// 大きな床の上で足元の球が接するケースもトリガーとして拾う。
+const floor = { pos: [0, 0, 0], rot: [1,0,0,0,1,0,0,0,1], half: [60,0.5,40] };
+assert.equal(sphereIntersectsOBB([0, 1.4001, 0], 0.9, floor), true);
 
 const calls = [];
 const runtime = createLogicRuntime(resolveLogicConfig({ id: 'obby', params: { killY: -20 } }), {

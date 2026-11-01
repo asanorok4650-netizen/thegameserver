@@ -34,7 +34,9 @@ export function sphereIntersectsOBB(point, radius, box) {
   const qy = Math.max(-h[1], Math.min(h[1], ly));
   const qz = Math.max(-h[2], Math.min(h[2], lz));
   const ex = lx - qx, ey = ly - qy, ez = lz - qz;
-  return ex * ex + ey * ey + ez * ez <= radius * radius;
+  // 接触ぴったりの状態は浮動小数点誤差で取りこぼしやすいため、少しだけ許容する。
+  const triggerRadius = radius + 0.12;
+  return ex * ex + ey * ey + ez * ez <= triggerRadius * triggerRadius;
 }
 
 const CELL = 16;
@@ -89,7 +91,8 @@ export class CollisionWorld {
   pushOut(p, r) {
     this.maxNy = -1; this.minNy = 1;
     let any = false;
-    for (let iter = 0; iter < 3; iter++) {
+    // 角や複数パーツに同時に挟まれた場合も、十分に押し出しを反復する。
+    for (let iter = 0; iter < 8; iter++) {
       const cand = this._candidates(p, r);
       let hit = false;
       for (const c of cand) if (this._test(c, p, r)) hit = true;
