@@ -31,6 +31,7 @@ export function buildSceneFromWorld(worldJson) {
   const buckets = new Map();
   const collision = new CollisionWorld();
   const triggers = [];
+  const ruleTriggers = [];
   const dynamics = new Dynamics(collision);
   const slots = new Map(); // partId → { key, i }(動くパーツの見た目を更新するため)
   const pending = [];
@@ -50,6 +51,7 @@ export function buildSceneFromWorld(worldJson) {
       b.list.push({ matrix: mat, color: new THREE.Color(p.color) });
     }
 
+    ruleTriggers.push({ id: p.id, name: p.name, tags: [], pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2], size: [sx, sy, sz] });
     const behavior = resolveBehavior(p.attrs);
     const tags = Array.isArray(p.tags) ? p.tags.filter((tag) => typeof tag === 'string' && tag) : [];
     let trigger = null;
@@ -116,7 +118,7 @@ export function buildSceneFromWorld(worldJson) {
     const top = collision.highestTopAt(0, 0), b = collision.bounds();
     spawn = top !== null ? [0, top + 0.2, 0] : b ? [(b.min[0] + b.max[0]) / 2, b.max[1] + 10, (b.min[2] + b.max[2]) / 2] : [0, 10, 0];
   }
-  return { group, collision, triggers, dynamics, environment: resolveEnvironment(worldJson.environment), spawn, stats };
+  return { group, collision, triggers, ruleTriggers, ruleParts: ruleTriggers, dynamics, environment: resolveEnvironment(worldJson.environment), spawn, stats };
 }
 
 export function buildWorld(tree, log = () => {}) {
