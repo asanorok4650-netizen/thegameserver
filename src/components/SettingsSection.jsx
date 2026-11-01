@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { CONFIG } from '../config.js';
+import ServerSettings from './ServerSettings.jsx';
 
-export default function SettingsSection() {
+export default function SettingsSection({ servers, onServersChanged }) {
   const [proxy, setProxy] = useState(CONFIG.proxyBase);
   const [pixelRatio, setPixelRatio] = useState(String(CONFIG.pixelRatioCap));
   const [msg, setMsg] = useState({ text: '', kind: '' });
@@ -47,6 +48,8 @@ export default function SettingsSection() {
 
   return (
     <>
+      <ServerSettings servers={servers} onChanged={onServersChanged} />
+
       <section className="section-block" id="settings-proxy">
         <div className="section-heading">
           <div>
