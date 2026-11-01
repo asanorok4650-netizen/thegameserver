@@ -273,6 +273,10 @@ export default function StudioPage({ onExit }) {
                     <button className="secondary-button" type="button" onClick={() => actions.rules(defaultRules())}>既定値に戻す</button>
                   </div>
                 </details>
+                <details className="st-details" open>
+                  <summary>イベントルール（ノーコード）</summary>
+                  <div className="st-logic-config"><RulesSection rules={doc.eventRules || []} parts={doc.parts} onChange={actions.eventRules} /></div>
+                </details>
                 <details className="st-details">
                   <summary>空・光・霧</summary>
                   <div className="st-logic-config">
