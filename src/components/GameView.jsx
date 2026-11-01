@@ -6,7 +6,7 @@ import { buildAvatar } from '../avatar/builder.js';
 import { serverFileUrl } from '../servers/api.js';
 
 const JOY_R = 55;
-const tick = () => new Promise((r) => setTimeout(r, 0)); // 画面(ログ)を更新する隙間を作る
+const tick = () => new Promise((r) => setTimeout(r, 0));
 const mb = (n) => (n / 1048576).toFixed(1) + 'MB';
 
 export default function GameView({ server, desc, onExit }) {
@@ -17,16 +17,18 @@ export default function GameView({ server, desc, onExit }) {
   const joy = useRef({ id: null, ox: 0, oy: 0 });
   const look = useRef({ id: null, x: 0, y: 0 });
   const descRef = useRef(desc);
-  const [phase, setPhase] = useState('loading'); // loading | playing | error
+  const [phase, setPhase] = useState('loading');
   const [lines, setLines] = useState([]);
   const [progress, setProgress] = useState('');
   const [showLog, setShowLog] = useState(true);
+  const [completed, setCompleted] = useState(false);
 
   useEffect(() => {
     let dead = false;
     const ac = new AbortController();
     const game = new Game(hostRef.current);
     gameRef.current = game;
+    setCompleted(false);
     const log = (kind, text) => { if (!dead) setLines((l) => [...l.slice(-80), { kind, text }]); };
 
     (async () => {
@@ -53,11 +55,14 @@ export default function GameView({ server, desc, onExit }) {
         await tick();
         const world = buildSceneFromWorld(pkg.worldJson);
         const s = world.stats;
-        log('ok', `パーツ ${s.parts}個(描画 ${s.drawn} / 衝突 ${s.collidable})`);
+        log('ok', `パーツ ${s.parts}個(描画 ${s.drawn} / 衝突 ${s.collidable} / トリガー ${s.triggers})`);
         if (!s.spawnFound) log('warn', 'SpawnLocationがありません。原点付近から開始します');
         for (const [k, v] of Object.entries(pkg.report.ignored)) log('warn', `${k} ${v}件は未対応のため表示されません`);
         for (const [k, v] of Object.entries(pkg.report.approx)) log('warn', `${k} ${v}個は箱の形で代用しています`);
-        game.setLogic(pkg.logic);
+        game.setLogic(pkg.logic, {
+          onComplete: () => { if (!dead) setCompleted(true); },
+          onRestart: () => { if (!dead) setCompleted(false); }
+        });
         game.setWorld(world);
 
         log('info', 'キャラクターを配置中…');
@@ -74,9 +79,8 @@ export default function GameView({ server, desc, onExit }) {
     })();
 
     return () => { dead = true; ac.abort(); game.dispose(); gameRef.current = null; };
-  }, [server.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [server.id]);
 
-  // ---- 左: 仮想ジョイスティック ----
   function joyDown(e) {
     if (joy.current.id !== null) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -103,8 +107,6 @@ export default function GameView({ server, desc, onExit }) {
     baseRef.current.style.display = 'none';
     if (gameRef.current) gameRef.current.setMove(0, 0);
   }
-
-  // ---- 右: ドラッグでカメラ回転 ----
   function lookDown(e) {
     if (look.current.id !== null) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -121,7 +123,7 @@ export default function GameView({ server, desc, onExit }) {
   return (
     <div className="game-root">
       <div className="game-canvas" ref={hostRef} />
-      {phase === 'playing' && (
+      {phase === 'playing' && !completed && (
         <div className="game-controls">
           <div className="joy-zone" onPointerDown={joyDown} onPointerMove={joyMove} onPointerUp={joyUp} onPointerCancel={joyUp}>
             <div className="joy-base" ref={baseRef}><div className="joy-knob" ref={knobRef} /></div>
@@ -140,6 +142,17 @@ export default function GameView({ server, desc, onExit }) {
         <span className="game-title">{server.name}</span>
         <button className="game-chip" onClick={() => setShowLog((v) => !v)}>ログ</button>
       </div>
+      {completed && (
+        <div className="game-clear-overlay" role="dialog" aria-modal="true" aria-labelledby="game-clear-title">
+          <div className="game-clear-card">
+            <div className="game-clear-mark">★</div>
+            <h2 id="game-clear-title">ステージクリア！</h2>
+            <p>おめでとうございます！</p>
+            <button className="game-replay-button" onClick={() => gameRef.current?.restart()}>もう一度プレイ</button>
+            <button className="game-clear-exit" onClick={onExit}>ホームに戻る</button>
+          </div>
+        </div>
+      )}
       {(phase !== 'playing' || showLog) && (
         <div className={`game-log${phase !== 'playing' ? ' big' : ''}`}>
           {lines.map((l, i) => <div key={i} className={`log-${l.kind}`}>{l.text}</div>)}

@@ -23,6 +23,20 @@ export function planesFromPoly(def, size) {
 export const wedgePlanes = (size) => planesFromPoly(POLY.wedge, size);
 export const cornerPlanes = (size) => planesFromPoly(POLY.corner, size);
 
+/** 球と回転した箱(OBB)の重なり判定。タグ付きトリガー用で、衝突応答は行わない。 */
+export function sphereIntersectsOBB(point, radius, box) {
+  const dx = point[0] - box.pos[0], dy = point[1] - box.pos[1], dz = point[2] - box.pos[2];
+  const R = box.rot, h = box.half;
+  const lx = R[0] * dx + R[3] * dy + R[6] * dz;
+  const ly = R[1] * dx + R[4] * dy + R[7] * dz;
+  const lz = R[2] * dx + R[5] * dy + R[8] * dz;
+  const qx = Math.max(-h[0], Math.min(h[0], lx));
+  const qy = Math.max(-h[1], Math.min(h[1], ly));
+  const qz = Math.max(-h[2], Math.min(h[2], lz));
+  const ex = lx - qx, ey = ly - qy, ez = lz - qz;
+  return ex * ex + ey * ey + ez * ez <= radius * radius;
+}
+
 const CELL = 16;
 const hash = (x, y, z) => ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) | 0;
 
@@ -32,11 +46,10 @@ export class CollisionWorld {
     this.grid = new Map();
     this.big = [];
     this.stamp = 0;
-    this.maxNy = -1; // 直近の pushOut で当たった面の法線Yの最大/最小(接地・天井の判定用)
+    this.maxNy = -1;
     this.minNy = 1;
   }
 
-  /** c: { type:'box'|'convex'|'ball', pos:[x,y,z], rot:[9個(行優先)], half:[hx,hy,hz], planes?, radius? } */
   add(c) {
     const R = c.rot, h = c.half, p = c.pos;
     const e = c.type === 'ball' ? [c.radius, c.radius, c.radius] : [
@@ -49,7 +62,7 @@ export class CollisionWorld {
     this.items.push(c);
     const lo = c.min.map((v) => Math.floor(v / CELL)), hi = c.max.map((v) => Math.floor(v / CELL));
     const cells = (hi[0] - lo[0] + 1) * (hi[1] - lo[1] + 1) * (hi[2] - lo[2] + 1);
-    if (cells > 400) { this.big.push(c); return; } // 巨大パーツ(ベースプレートなど)は常に検査
+    if (cells > 400) { this.big.push(c); return; }
     for (let x = lo[0]; x <= hi[0]; x++) for (let y = lo[1]; y <= hi[1]; y++) for (let z = lo[2]; z <= hi[2]; z++) {
       const k = hash(x, y, z);
       let a = this.grid.get(k);
@@ -58,7 +71,6 @@ export class CollisionWorld {
     }
   }
 
-  /** (x,z) の真上から見て一番高い面の高さ(スポーン位置の推定用)。無ければ null */
   highestTopAt(x, z) {
     let best = null;
     for (const c of this.items) {
@@ -74,7 +86,6 @@ export class CollisionWorld {
     return this.items.length ? { min: mn, max: mx } : null;
   }
 
-  /** 球(中心 p を直接書き換える)を押し出す。当たったら true */
   pushOut(p, r) {
     this.maxNy = -1; this.minNy = 1;
     let any = false;
@@ -120,7 +131,6 @@ export class CollisionWorld {
       return this._apply(p, dx / d, dy / d, dz / d, rr - d);
     }
     const R = c.rot, h = c.half;
-    // ローカル座標(R の転置を掛ける)
     const lx = R[0] * dx + R[3] * dy + R[6] * dz, ly = R[1] * dx + R[4] * dy + R[7] * dz, lz = R[2] * dx + R[5] * dy + R[8] * dz;
     let nlx, nly, nlz, depth;
     if (c.type === 'convex') {
@@ -137,7 +147,7 @@ export class CollisionWorld {
       const ex = lx - qx, ey = ly - qy, ez = lz - qz, d2 = ex * ex + ey * ey + ez * ez;
       if (d2 >= r * r) return false;
       if (d2 > 1e-12) { const d = Math.sqrt(d2); nlx = ex / d; nly = ey / d; nlz = ez / d; depth = r - d; }
-      else { // 中心が箱の内側: 一番浅い面から出す
+      else {
         const gx = h[0] - Math.abs(lx), gy = h[1] - Math.abs(ly), gz = h[2] - Math.abs(lz);
         nlx = nly = nlz = 0;
         if (gx <= gy && gx <= gz) { nlx = lx < 0 ? -1 : 1; depth = r + gx; }

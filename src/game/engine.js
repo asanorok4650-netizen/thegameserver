@@ -1,11 +1,14 @@
-// ゲーム本体: シーン・プレイヤー(歩行/ジャンプ/衝突)・三人称カメラ。UIからは setMove/look/setJump を呼ぶ。
+// ゲーム本体: シーン・プレイヤー(歩行/ジャンプ/衝突)・三人称カメラ。
+// ゲーム固有のルールは logics/ の Runtime に委譲する。
 import * as THREE from 'three';
 import { CONFIG } from '../config.js';
 import { disposeObject } from '../avatar/builder.js';
 import { makeAnimator } from './character.js';
 import { disposeWorld } from './world.js';
+import { sphereIntersectsOBB } from './collision.js';
+import { createLogicRuntime } from '../logics/index.js';
 
-const WALK = 16, JUMP = 50, GRAVITY = 196.2, RADIUS = 0.9; // Robloxの既定値(studs)
+const WALK = 16, JUMP = 50, GRAVITY = 196.2, RADIUS = 0.9;
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
 
 export class Game {
@@ -32,7 +35,9 @@ export class Game {
     this.keys = new Set();
     this.joy = { x: 0, y: 0 };
     this.jumpHeld = false;
-    this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.logic = null;
+    this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.initialSpawn = this.spawn.slice();
+    this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
+    this.activeTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
     this.minY = -500;
@@ -51,6 +56,7 @@ export class Game {
 
   _key(e, down) {
     if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (this.completed) return;
     if (e.code === 'Space') { this.jumpHeld = down; e.preventDefault(); return; }
     const k = KEYMAP[e.code];
     if (!k) return;
@@ -66,31 +72,45 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
-  setMove(x, y) { this.joy.x = x; this.joy.y = y; }   // y: 前が正
-  setJump(v) { this.jumpHeld = !!v; }
+  setMove(x, y) { if (!this.completed) { this.joy.x = x; this.joy.y = y; } }
+  setJump(v) { if (!this.completed) this.jumpHeld = !!v; }
   look(dx, dy) {
     this.yaw -= dx * 0.006;
     this.pitch = Math.min(1.35, Math.max(-0.2, this.pitch + dy * 0.006));
   }
 
-  setLogic(logic) { this.logic = logic || null; }
+  setLogic(logic, handlers = {}) {
+    this.logic = logic || null;
+    this.logicHandlers = handlers;
+    this.logicRuntime = createLogicRuntime(this.logic, {
+      respawn: () => this.respawn(),
+      setCheckpoint: (position) => { this.spawn = position.slice(); },
+      complete: () => {
+        this.completed = true;
+        this.keys.clear();
+        this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
+        this.vel.set(0, 0, 0);
+        this.logicHandlers.onComplete?.();
+      }
+    });
+  }
 
   setWorld(world) {
-    this.world = world; this.collision = world.collision; this.spawn = world.spawn;
+    this.world = world; this.collision = world.collision;
+    this.spawn = world.spawn.slice(); this.initialSpawn = world.spawn.slice();
     this.scene.add(world.group);
     const b = world.collision.bounds();
     this.minY = b ? Math.min(-500, b.min[1] - 300) : -500;
     this.respawn();
   }
 
-  /** built = buildAvatar() の戻り値 */
   setAvatar(built) {
     if (this.holder) { this.scene.remove(this.holder); disposeObject(this.holder); }
     const H = Math.max(3, built.box.max.y - built.box.min.y);
     this.height = H;
     this.sy = [RADIUS, H / 2, H - RADIUS];
     this.anim = makeAnimator(built);
-    built.group.position.y = -built.box.min.y; // 足元を原点に
+    built.group.position.y = -built.box.min.y;
     this.holder = new THREE.Group();
     this.holder.add(built.group);
     this.scene.add(this.holder);
@@ -100,6 +120,18 @@ export class Game {
   respawn() {
     this.p.set(this.spawn[0], this.spawn[1], this.spawn[2]);
     this.vel.set(0, 0, 0);
+    this.grounded = false;
+    this.activeTriggers.clear();
+  }
+
+  restart() {
+    this.completed = false;
+    this.spawn = this.initialSpawn.slice();
+    this.logicRuntime?.reset?.();
+    this.keys.clear();
+    this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
+    this.respawn();
+    this.logicHandlers.onRestart?.();
   }
 
   _resolve() {
@@ -116,21 +148,46 @@ export class Game {
     return { up, ceil };
   }
 
+  _checkTriggers() {
+    if (!this.logicRuntime || !this.world?.triggers?.length || this.completed) return;
+    const now = new Set();
+    for (const trigger of this.world.triggers) {
+      let touching = false;
+      for (const y of this.sy) {
+        if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) {
+          touching = true;
+          break;
+        }
+      }
+      if (!touching) continue;
+      now.add(trigger.id);
+      if (!this.activeTriggers.has(trigger.id)) {
+        for (const tag of trigger.tags) {
+          this.logicRuntime.onContact({ tag, part: trigger, position: this.p });
+          if (this.completed) break;
+        }
+      }
+      if (this.completed) break;
+    }
+    this.activeTriggers = now;
+  }
+
   update(dt) {
     dt = Math.min(dt, 0.05);
+    if (this.completed) return;
     const k = this.keys;
     let mx = this.joy.x + (k.has('r') ? 1 : 0) - (k.has('l') ? 1 : 0);
     let my = this.joy.y + (k.has('f') ? 1 : 0) - (k.has('b') ? 1 : 0);
     const len = Math.hypot(mx, my);
     if (len < 0.15) { mx = 0; my = 0; } else if (len > 1) { mx /= len; my /= len; }
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
-    const wx = -sy * my + cy * mx, wz = -cy * my - sy * mx; // カメラ基準の前/右
+    const wx = -sy * my + cy * mx, wz = -cy * my - sy * mx;
     this.vel.x = wx * WALK; this.vel.z = wz * WALK;
     if (this.grounded && this.jumpHeld) { this.vel.y = JUMP; this.grounded = false; }
     this.vel.y -= GRAVITY * dt;
 
     const dist = Math.max(Math.abs(this.vel.x), Math.abs(this.vel.y), Math.abs(this.vel.z)) * dt;
-    const steps = Math.max(1, Math.ceil(dist / 0.4)); // すり抜け防止: 1回の移動を0.4studs以下に分割
+    const steps = Math.max(1, Math.ceil(dist / 0.4));
     let grounded = false;
     for (let i = 0; i < steps; i++) {
       this.p.addScaledVector(this.vel, dt / steps);
@@ -141,19 +198,19 @@ export class Game {
       }
     }
     this.grounded = grounded;
-    if (this.p.y < this.minY) this.respawn();
-
-    const speed = Math.hypot(this.vel.x, this.vel.z);
+    this._checkTriggers();
+    this.logicRuntime?.update?.({ position: this.p, dt });
+    if (this.holder) {
+      this.holder.position.copy(this.p);
+      this.holder.rotation.y = this.heading;
+      const speed = Math.hypot(this.vel.x, this.vel.z);
+      if (this.anim) this.anim.update(dt, speed, this.grounded);
+    }
     if (mx !== 0 || my !== 0) {
       const target = Math.atan2(-wx, -wz);
       let d = target - this.heading;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       this.heading += d * Math.min(1, dt * 14);
-    }
-    if (this.holder) {
-      this.holder.position.copy(this.p);
-      this.holder.rotation.y = this.heading;
-      if (this.anim) this.anim.update(dt, speed, this.grounded);
     }
   }
 
