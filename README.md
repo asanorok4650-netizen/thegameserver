@@ -49,6 +49,26 @@ npx wrangler secret put ROBLOX_API_KEY      # 貼り付けて Enter
 なお、取得したアセットはWorkerのエッジキャッシュに保存して、キーの利用回数を節約します
 (`*.workers.dev` でキャッシュが効くかは未確認。独自ドメインなら有効です)。
 
+## サーバー(rbxl)一覧の準備(Cloudflare R2 + D1 + Worker)
+ホーム画面には、**自分がR2/D1に登録したrbxlだけ**が並びます(誰でもアップロードできる方式は廃止)。
+rbxl本体は R2、一覧情報は D1、窓口は `worker/index.js`(合言葉で追加・削除を保護)です。
+
+```bash
+cd worker
+npx wrangler r2 bucket create rbxl-servers
+npx wrangler d1 create rbxl-servers-db          # 出力された database_id を worker/wrangler.toml に貼る
+npx wrangler d1 execute rbxl-servers-db --remote --file=./schema.sql
+npx wrangler secret put ADMIN_PASSPHRASE        # 管理用の合言葉(リポジトリには書かない)
+npx wrangler deploy
+```
+1. デプロイ後のURL(`https://rbxl-player-api.xxxx.workers.dev`)を、アプリの「設定 → サーバー管理」に入力 → 保存 → 接続テスト。
+   Cloudflare Pagesの環境変数 `VITE_API_BASE` に入れておけば、ビルド時の既定値になります。
+2. 同じ画面で合言葉を入れて「サーバーを追加」から rbxl を選ぶと、R2に保存されホームに表示されます。
+3. 公開するときは `worker/wrangler.toml` の `ALLOWED_ORIGIN` をサイトのURLに変更してください。
+
+API: `GET /api/servers`(一覧)/ `GET /api/servers/:id/file`(rbxl本体)/ `POST /api/servers`・`DELETE /api/servers/:id`(要合言葉)。
+アップロード上限は100MB(Workersのリクエスト上限)。合言葉はこのブラウザのlocalStorageに保存されます。
+
 ## 構成(追加分)
 ```
 src/
