@@ -4,6 +4,8 @@ v0.2のホームUI(React化したデザイン)に、パーツ組み立て式の�
 `src/style.css` は変更していません。追加スタイルは `src/avatar.css` に分けています。
 
 ## 開発
+
+開発者向けの構成・データ形式・ゲームエンジン・ロジック追加方法は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) を参照してください。
 ```bash
 npm install      # three を追加したので、初回は必ず実行(package-lock.json が更新されます)
 npm run dev
