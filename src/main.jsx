@@ -4,6 +4,8 @@ import App from './App.jsx';
 import './style.css';
 import './avatar.css';
 import './servers.css';
+import './game.css';
+import './studio/studio.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
