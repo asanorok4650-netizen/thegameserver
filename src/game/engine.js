@@ -9,6 +9,8 @@ import { sphereIntersectsOBB } from './collision.js';
 import { createLogicRuntime } from '../logics/index.js';
 import { createRuleRuntime } from '../rules/runtime.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
+import { compileBlocklyWorkspace } from '../scripting/compiler.js';
+import { createBlocklyRuntime } from '../scripting/runtime.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
@@ -45,6 +47,7 @@ export class Game {
     this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.initialSpawn = this.spawn.slice();
     this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
     this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.ruleTriggerParts = []; this.activeRuleTriggers = new Set();
+    this.scriptingWorkspace = null; this.scriptRuntime = null; this.scriptHandlers = {};
     this.activeTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
@@ -114,6 +117,20 @@ export class Game {
     });
   }
 
+  setScripting(workspace, handlers = {}) {
+    this.scriptingWorkspace = workspace || null;
+    this.scriptHandlers = handlers;
+    const compiled = compileBlocklyWorkspace(this.scriptingWorkspace);
+    if (compiled.errors.length) handlers.onWarning?.('スクリプトのコンパイル警告: ' + compiled.errors.join(' / '));
+    this.scriptRuntime = createBlocklyRuntime(compiled, {
+      onScore: handlers.onScore,
+      onMessage: handlers.onMessage,
+      onWarning: handlers.onWarning,
+      setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; }
+    });
+    if (this.world) { this.scriptRuntime.start(); this.scriptRuntime.onSpawn(); }
+  }
+
   setEventRules(rules, handlers = {}) {
     this.eventRulesConfig = Array.isArray(rules) ? rules : [];
     this.eventRuleHandlers = handlers;
@@ -151,6 +168,8 @@ export class Game {
     const b = world.collision.bounds();
     this.minY = b ? Math.min(-500, b.min[1] - 300) : -500;
     this.respawn();
+    this.scriptRuntime?.start();
+    this.scriptRuntime?.onSpawn();
   }
 
   setAvatar(built) {
@@ -179,6 +198,9 @@ export class Game {
     this.spawn = this.initialSpawn.slice();
     this.logicRuntime?.reset?.();
     this.ruleRuntime?.reset?.();
+    this.scriptRuntime?.reset?.();
+    this.scriptRuntime?.start();
+    this.scriptRuntime?.onSpawn();
     this.keys.clear();
     this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
     this.respawn();
@@ -206,6 +228,7 @@ export class Game {
       }
       if (!touching) continue;
       now.add(trigger.id);
+      if (this.scriptRuntime && !this.activeTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger);
       if (this.logicRuntime && !this.activeTriggers.has(trigger.id)) {
         for (const tag of trigger.tags) {
           this.logicRuntime.onContact({ tag, part: trigger, position: this.p });
@@ -273,6 +296,7 @@ export class Game {
     this._checkTriggers();
     this.logicRuntime?.update?.({ position: this.p, dt });
     this.ruleRuntime?.update?.(dt);
+    this.scriptRuntime?.update?.(dt);
     if (this.holder) {
       this.holder.position.copy(this.p);
       this.holder.rotation.y = this.heading;
