@@ -19,13 +19,15 @@ export function createRuleRuntime(rawRules, api = {}) {
     if (node.kind === 'variable') return variables.get(node.name) ?? 0;
     if (node.kind === 'math') {
       const a = Number(evaluate(node.left)) || 0, b = Number(evaluate(node.right)) || 0;
+      let result;
       switch (node.op) {
-        case 'sub': return a - b;
-        case 'mul': return a * b;
-        case 'div': return b === 0 ? 0 : a / b;
-        case 'mod': return b === 0 ? 0 : a % b;
-        default: return a + b;
+        case 'sub': result = a - b; break;
+        case 'mul': result = a * b; break;
+        case 'div': result = b === 0 ? 0 : a / b; break;
+        case 'mod': result = b === 0 ? 0 : a % b; break;
+        default: result = a + b;
       }
+      return Number.isFinite(result) ? Math.max(-1000000000, Math.min(1000000000, result)) : 0;
     }
     if (node.kind === 'compare') {
       const a = evaluate(node.left), b = evaluate(node.right);
