@@ -9,6 +9,7 @@ import FieldForm from './FieldForm.jsx';
 import { BEHAVIOR_LIST, BEHAVIORS, resolveBehavior } from '../behaviors/index.js';
 import { RULE_FIELDS, ENV_FIELDS, defaultRules, defaultEnvironment } from '../game/rules.js';
 import BlockEditor from './BlockEditor.jsx';
+import BlocklyEditor from './BlocklyEditor.jsx';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
@@ -106,6 +107,7 @@ export default function StudioPage({ onExit }) {
   const fileRef = useRef(null);
   const [tab, setTab] = useState('select');
   const [workspace, setWorkspace] = useState('3d');
+  const [blockMode, setBlockMode] = useState('blockly');
   const [grid, setGrid] = useState(1);
   const [filter, setFilter] = useState('');
   const sel = new Set(selection);
@@ -201,7 +203,14 @@ export default function StudioPage({ onExit }) {
         <div className="studio-view">
           <div className={`studio-canvas${workspace === '3d' ? '' : ' is-hidden'}`} ref={hostRef} />
           <div className={`studio-block-canvas${workspace === 'blocks' ? '' : ' is-hidden'}`}>
-            <BlockEditor rules={doc.eventRules || []} parts={doc.parts} onChange={actions.eventRules} />
+            <div className="st-block-mode-switch" role="group" aria-label="ブロックエディター">
+              <button type="button" className={blockMode === 'blockly' ? 'active' : ''} onClick={() => setBlockMode('blockly')}>Blocklyエディター</button>
+              <button type="button" className={blockMode === 'legacy' ? 'active' : ''} onClick={() => setBlockMode('legacy')}>旧ルールエディター</button>
+            </div>
+            {blockMode === 'blockly' ? (
+              <BlocklyEditor initialState={doc.scripting?.workspace || null}
+                onChange={(workspaceState) => actions.scripting({ version: 1, workspace: workspaceState })} />
+            ) : <div className="st-legacy-block-editor"><BlockEditor rules={doc.eventRules || []} parts={doc.parts} onChange={actions.eventRules} /></div>}
           </div>
           {workspace === '3d' && <>
             <div className="studio-addbar">
