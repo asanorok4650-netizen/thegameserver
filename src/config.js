@@ -3,6 +3,12 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === 
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 無視 */ } };
 
 export const CONFIG = {
+  // サーバー一覧API(worker/index.js のURL)。未設定ならビルド時の VITE_API_BASE を使う
+  get apiBase() { return lsGet('rbxl.apiBase', (import.meta.env && import.meta.env.VITE_API_BASE) || ''); },
+  set apiBase(v) { lsSet('rbxl.apiBase', String(v || '').trim()); },
+  // 管理用の合言葉(このブラウザにだけ保存。空にすると消えます)
+  get adminPassphrase() { return lsGet('rbxl.adminPassphrase', ''); },
+  set adminPassphrase(v) { lsSet('rbxl.adminPassphrase', String(v || '')); },
   // Roblox APIへのCORSプロキシ(worker/proxy.js をデプロイしたURL)
   get proxyBase() { return lsGet('rbxl.proxyBase', ''); },
   set proxyBase(v) { lsSet('rbxl.proxyBase', String(v || '').trim()); },

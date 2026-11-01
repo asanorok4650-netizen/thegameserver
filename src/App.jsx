@@ -1,10 +1,9 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { PAGES } from './pages.js';
-import { useLibrary } from './hooks/useLibrary.js';
+import { useServers } from './hooks/useServers.js';
 import Sidebar from './components/Sidebar.jsx';
 import Topbar from './components/Topbar.jsx';
-import RecentSection from './components/RecentSection.jsx';
-import LibrarySection from './components/LibrarySection.jsx';
+import ServersSection from './components/ServersSection.jsx';
 import PlaceholderSection from './components/PlaceholderSection.jsx';
 import AvatarSection from './components/AvatarSection.jsx';
 import SettingsSection from './components/SettingsSection.jsx';
@@ -15,8 +14,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
-  const fileInputRef = useRef(null);
-  const { items, addFile } = useLibrary();
+  const servers = useServers();
   const avatar = useAvatar();
 
   const config = PAGES[page] || PAGES.home;
@@ -27,26 +25,8 @@ export default function App() {
     setSidebarOpen(false);
   }
 
-  function openFile() {
-    fileInputRef.current?.click();
-  }
-
-  function handleFileChange(e) {
-    const input = e.target;
-    const file = input.files && input.files[0];
-    if (!file) return;
-    const extension = file.name.split('.').pop().toLowerCase();
-    if (extension !== 'rbxl' && extension !== 'rbxlx') {
-      setStatus('対応しているファイルは .rbxl / .rbxlx です。');
-      return;
-    }
-    const result = addFile(file, extension);
-    setStatus(
-      result.ok
-        ? file.name + ' をライブラリに追加しました。※現在は画面表示のみで、ゲームの解析・実行機能は未実装です。'
-        : 'ブラウザに保存できませんでした。ブラウザの保存設定をご確認ください。'
-    );
-    input.value = '';
+  function handleJoin(server) {
+    setStatus('「' + server.name + '」への参加機能は次の開発段階(0.4.x)で実装します。');
   }
 
   return (
@@ -66,29 +46,19 @@ export default function App() {
               <h1 id="page-title">{config.title}</h1>
               <p className="subheading" id="page-subtitle">{config.subtitle}</p>
             </div>
-            <button className="primary-button" id="open-file-button" onClick={openFile}>
-              <span>＋</span> ゲームを開く
-            </button>
-            <input
-              ref={fileInputRef}
-              id="file-input"
-              type="file"
-              accept=".rbxl,.rbxlx"
-              hidden
-              onChange={handleFileChange}
-            />
           </div>
 
-          {show('recent') && (
-            <RecentSection
-              items={items}
+          {show('servers') && (
+            <ServersSection
+              servers={servers.servers}
+              loading={servers.loading}
+              error={servers.error}
               query={query}
-              onOpenFile={openFile}
+              onRefresh={servers.refresh}
               onNavigate={navigate}
-              onCardClick={() => setStatus('RBXLの解析・実行機能は次の開発段階で実装します。')}
+              onJoin={handleJoin}
             />
           )}
-          {show('library') && <LibrarySection onOpenFile={openFile} />}
           {show('friends') && (
             <PlaceholderSection
               id="friends-section"
@@ -111,7 +81,7 @@ export default function App() {
           )}
 
           {show('avatar') && <AvatarSection avatar={avatar} />}
-          {show('settings') && <SettingsSection />}
+          {show('settings') && <SettingsSection servers={servers.servers} onServersChanged={servers.refresh} />}
 
           <p className="status-message" id="status-message" role="status" aria-live="polite">{status}</p>
           <footer>RBXL Player <span>•</span> Browser-based world player</footer>
