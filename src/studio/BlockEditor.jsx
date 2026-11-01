@@ -1,4 +1,4 @@
-import { ACTION_TYPES, CONDITION_TYPES, EVENT_TYPES } from '../rules/schema.js';
+import { ACTION_TYPES, EVENT_TYPES } from '../rules/schema.js';
 
 const ACTION_DEFAULTS = {
   add_score: { type: 'add_score', value: 1 },
