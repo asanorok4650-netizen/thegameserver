@@ -57,17 +57,17 @@ export function createBlocklyRuntime(program, api = {}) {
       }
     }
   }
-  const launch = (event, target) => {
+  const launch = (event, target, alias) => {
     if (stopped || tasks.length >= MAX_TASKS) return;
     for (const item of program?.events || []) {
-      if (item.event !== event || (event === 'touch' && item.target && item.target !== target)) continue;
+      if (item.event !== event || (event === 'touch' && item.target && item.target !== target && item.target !== alias)) continue;
       tasks.push({ iterator: runSteps(item.body), wake: elapsed });
     }
   };
   return {
     start() { launch('start'); },
     onSpawn() { launch('spawn'); },
-    onTouch(part) { launch('touch', part?.id); if (part?.name && part.name !== part.id) launch('touch', part.name); },
+    onTouch(part) { launch('touch', part?.id, part?.name); },
     update(dt) {
       if (stopped) return;
       elapsed += Math.max(0, Math.min(0.1, dt || 0));
