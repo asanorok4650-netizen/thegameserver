@@ -50,8 +50,8 @@ export function createBlocklyRuntime(program, api = {}) {
         case 'setVariable': variables.set(step.name, clamp(read(step.value))); yield 0; break;
         case 'changeVariable': variables.set(step.name, clamp((variables.get(step.name)||0) + read(step.value))); yield 0; break;
         case 'message': api.onMessage?.(String(step.text || '').replace(/\{([\wぁ-んァ-ヶ一-龠]+)\}/g, (_, n) => String(variables.get(n) ?? 0))); yield 0; break;
-        case 'partVisible': api.setPartVisible?.(step.part, !!step.visible); yield 0; break;
-        case 'movePart': api.movePart?.(step.part, step.position); yield 0; break;
+        case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
+        case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
         default: yield 0;
       }
