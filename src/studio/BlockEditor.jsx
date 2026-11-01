@@ -31,7 +31,7 @@ function ExpressionBlock({ node, onChange, variables, depth = 0 }) {
     </div>
     {['math','compare'].includes(node.kind) && <div className="st-expr-children">{child('left', node.left)}{child('right', node.right)}</div>}
     {node.kind === 'logic' && <div className="st-expr-children">
-      {(node.items || []).map((item, i) => <div className="st-expr-child" key={i}>{child('items', item)}<button type="button" onClick={() => patch({ items: node.items.filter((_, n) => n !== i) })}>×</button></div>)}
+      {(node.items || []).map((item, i) => <div className="st-expr-child" key={i}><ExpressionBlock node={item} variables={variables} depth={depth + 1} onChange={(v) => patch({ items: node.items.map((x, n) => n === i ? v : x) })}/><button type="button" onClick={() => patch({ items: node.items.filter((_, n) => n !== i) })}>×</button></div>)}
       <button type="button" disabled={node.items.length >= 6 || node.op === 'not'} onClick={() => patch({ items: [...node.items, createCompare()] })}>＋ 条件</button>
     </div>}
   </div>;
