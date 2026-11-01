@@ -1,0 +1,22 @@
+{
+  "name": "rbxl-player",
+  "private": true,
+  "version": "0.3.2",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node test/rigs.test.mjs && node --import ./test/register.mjs test/builder.test.mjs && node --import ./test/register.mjs test/rbxm.test.mjs && node test/mesh.test.mjs && node test/worker.test.mjs && node test/api.test.mjs && node test/tgw.test.mjs && node test/studio.test.mjs && node test/logics.test.mjs && node test/obby-runtime.test.mjs"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}

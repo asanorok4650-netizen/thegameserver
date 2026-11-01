@@ -1,0 +1,70 @@
+/* thegameserver Studio。既存の style.css / game.css のボタン・入力欄を流用し、レイアウトだけ追加 */
+.studio-root{position:fixed;inset:0;z-index:100;background:#f7f7f8;display:flex;flex-direction:column;color:#24252b}
+.studio-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border-bottom:1px solid #e9e9ed;flex-wrap:wrap}
+.st-title{font-size:14px;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-spacer{flex:1}
+.st-chip{background:#4c4e58}
+.st-btn{border:1px solid #dfe1e8;background:#fff;border-radius:8px;padding:8px 12px;font:600 12px inherit;color:#4c4e58;cursor:pointer}
+.st-btn:disabled{opacity:.4;cursor:default}
+.st-btn:not(:disabled):hover{background:#f5f6fa}
+.st-select{border:1px solid #dfe1e8;background:#fff;border-radius:8px;padding:8px;font:600 12px inherit;color:#4c4e58}
+.st-publish{padding:9px 16px}
+
+.studio-body{flex:1;min-height:0;display:flex}
+.studio-view{position:relative;flex:1;min-width:0;background:#9ec9ff}
+.studio-canvas{position:absolute;inset:0;touch-action:none;user-select:none;-webkit-user-select:none}
+.studio-addbar{position:absolute;left:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap;max-width:calc(100% - 20px)}
+.studio-hint{position:absolute;left:10px;bottom:8px;right:10px;font-size:10px;color:#1c2b4d;opacity:.75;pointer-events:none}
+
+.studio-side{width:320px;flex:0 0 320px;background:#fff;border-left:1px solid #e9e9ed;display:flex;flex-direction:column;min-height:0}
+.st-tabs{display:flex;border-bottom:1px solid #eeeef1}
+.st-tab{flex:1;border:0;background:transparent;padding:11px 6px;font:700 12px inherit;color:#686a75;cursor:pointer;border-bottom:2px solid transparent}
+.st-tab.active{color:#3159ef;border-bottom-color:#335cff}
+.st-panel{flex:1;min-height:0;overflow:auto;padding:12px}
+.st-status{padding:6px 12px;margin:0;min-height:28px;border-top:1px solid #eeeef1}
+.st-status.ok{color:#1d8a4f}.st-status.error{color:#c0392b}
+
+.st-inspector{display:grid;gap:11px}
+.st-field{display:grid;gap:5px}
+.st-label{font-size:11px;font-weight:700;color:#686a75}
+.st-vec{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.st-num{padding:8px 6px;min-width:0}
+.st-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.st-note{font-size:11px;color:#858793;line-height:1.6;margin:0}
+.st-note.warn{color:#9a6a00}.st-note.err{color:#c0392b}
+.st-empty{font-size:12px;color:#92939c;line-height:1.8;text-align:center;margin:24px 8px}
+.st-check{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600}
+.st-color{width:100%;height:36px;border:1px solid #dfe1e8;border-radius:8px;background:#fff;padding:2px}
+.st-danger{color:#c0392b}
+
+.st-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:3px}
+.st-item{width:100%;display:flex;align-items:center;gap:8px;text-align:left;border:0;background:transparent;border-radius:8px;padding:8px;font:600 12px inherit;color:#24252b;cursor:pointer}
+.st-item:hover{background:#f5f6fa}
+.st-item.on{background:#edf1ff;color:#3159ef}
+.st-item small{margin-left:auto;color:#92939c;font-weight:500}
+.st-swatch{width:14px;height:14px;border-radius:4px;border:1px solid #0002;flex:0 0 14px}
+
+/* スマホ: ビューを上、パネルを下(ボトムシート風) */
+@media(max-width:760px){
+  .studio-body{flex-direction:column}
+  .studio-view{flex:1 1 52%}
+  .studio-side{width:auto;flex:1 1 48%;border-left:0;border-top:1px solid #e9e9ed}
+  .st-title{max-width:30vw}
+  .studio-hint{display:none}
+}
+
+/* 位置・サイズ・回転のスライダー */
+.st-group{display:grid;gap:6px;padding:10px;background:#f7f8fb;border:1px solid #eeeef1;border-radius:10px}
+.st-slide{display:grid;grid-template-columns:16px 1fr 72px;align-items:center;gap:8px}
+.st-axis{font:800 11px inherit;color:#7787ca;text-align:center}
+.st-range{width:100%;min-width:0;height:28px;margin:0;accent-color:#335cff;touch-action:pan-y}
+@media(pointer:coarse){.st-range{height:36px}}
+
+
+/* ロジック設定・タグ選択 */
+.st-logic-config{display:grid;gap:10px;padding:11px;background:#f7f8fb;border:1px solid #e8eaf0;border-radius:10px}
+.st-tag-options{display:grid;gap:6px}
+.st-tag-option{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid #e8eaf0;border-radius:8px;background:#fafbfe;font-size:12px;cursor:pointer}
+.st-tag-option input{accent-color:#335cff}
+.st-tag-option span{display:grid;gap:2px}
+.st-tag-option small{font-size:10px;color:#858793}

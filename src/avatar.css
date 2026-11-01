@@ -1,0 +1,40 @@
+/* アバター/設定ページ用の追加スタイル。既存の style.css は変更せず、同じ配色(#335cff系)に合わせて追加。 */
+.avatar-form{display:flex;gap:10px;max-width:640px}
+.text-input{flex:1;min-width:0;height:40px;padding:0 13px;border:1px solid #dfe1e8;border-radius:9px;background:#fff;font:inherit;font-size:14px;color:#282a31}
+.text-input:focus{outline:2px solid #9aabff;border-color:transparent}
+.avatar-form .primary-button{white-space:nowrap}
+.primary-button[disabled]{opacity:.6;cursor:default}
+.demo-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.demo-row .secondary-button{margin-top:0}
+.status-message.ok{color:#2f8f4e}
+.status-message.error{color:#d14343}
+
+.avatar-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px;align-items:start}
+.avatar-stage{height:min(62vh,520px);min-height:340px;border:1px solid #e8e9ee;border-radius:13px;overflow:hidden;
+  background:linear-gradient(180deg,#eef1ff 0%,#f7f7fb 100%)}
+.avatar-side{display:grid;gap:16px}
+.panel{background:#fff;border:1px solid #e8e9ee;border-radius:13px;padding:16px 18px}
+.panel h3{margin:0;font-size:14px;font-weight:750}
+.panel h3 small{font-weight:500;color:#92939c;font-size:11px;margin-left:4px}
+.panel-empty{margin:10px 0 0;font-size:12px;color:#92939c}
+
+.parts-list,.report-list{list-style:none;margin:10px 0 0;padding:0}
+.parts-list{display:grid;grid-template-columns:1fr 1fr;gap:2px 12px}
+.part-toggle{display:flex;align-items:center;gap:7px;padding:5px 0;font-size:12px;color:#3d3f48;cursor:pointer}
+.part-toggle input{width:17px;height:17px;accent-color:#335cff}
+.tag{font-size:10px;font-weight:700;padding:1px 7px;border-radius:9px;background:#edf1ff;color:#3159ef}
+.tag.ok{background:#e6f5ec;color:#2f8f4e}
+.tag.error{background:#fdeaea;color:#d14343}
+.report-list li{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-top:1px solid #eeeef1;font-size:12px}
+.report-list li:first-child{border-top:0}
+.report-list .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.report-list .st{font-size:11px;white-space:nowrap;max-width:48%;overflow:hidden;text-overflow:ellipsis}
+.report-list .st.ok{color:#2f8f4e}.report-list .st.skip{color:#92939c}.report-list .st.error{color:#d14343}
+
+.field-label{display:block;margin-bottom:8px;font-size:12px;font-weight:600;color:#5b5d68}
+.panel .text-input{width:100%}
+.button-row{display:flex;gap:10px;margin-top:14px}
+.button-row .secondary-button{margin-top:0}
+
+@media(max-width:900px){.avatar-layout{grid-template-columns:1fr}.avatar-stage{height:min(56vh,460px)}}
+@media(max-width:620px){.avatar-form{flex-direction:column}.avatar-form .primary-button{width:100%}.parts-list{grid-template-columns:1fr 1fr}}
