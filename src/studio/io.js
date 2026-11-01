@@ -1,6 +1,6 @@
 // Studioの入出力。サーバーに通信するのは publishDoc だけ(保存=ローカル、書き出し=ファイル)。
 import { docToPackage, docFromPackage, checkDoc } from './model.js';
-import { addServer, deleteServer } from '../servers/api.js';
+import { addServer, updateServer } from '../servers/api.js';
 import { loadWorldPackage } from '../game/loader.js';
 
 /** .tgw のバイト列を作る(fflate は使う時だけ読み込む) */
@@ -34,19 +34,24 @@ export async function openFile(file, log = () => {}) {
 
 /**
  * 公開(サーバーへのリクエストはここだけ)。
- * 現在のAPIには上書きがないため、「新規追加 → 成功したら以前の公開を削除」で置き換える。
- * 追加に失敗したら以前の公開は消さない。@returns { id, replaced }
+ * 公開済み(doc.publishedId あり)なら PUT で同じidのまま差し替える。
+ * 一覧にもう無い(404)/Workerが古くてPUT未対応(405)の場合は、新規追加(POST)にする。
+ * @returns { id, replaced, size }
  */
-export async function publishDoc(doc, passphrase, { replace = true } = {}) {
+export async function publishDoc(doc, passphrase) {
   const { errors } = checkDoc(doc);
   if (errors.length) throw new Error(errors.join(' / '));
   const bytes = await buildDocTgw(doc);
   const file = new File([bytes], safeName(doc.name) + '.tgw', { type: 'application/zip' });
-  const res = await addServer({ name: doc.name.trim(), description: doc.description, file }, passphrase);
-  const id = (res && (res.id || (res.server && res.server.id))) || null;
-  let replaced = false;
-  if (replace && doc.publishedId && id && doc.publishedId !== id) {
-    try { await deleteServer(doc.publishedId, passphrase); replaced = true; } catch { /* 古い公開が残るだけ。新しい公開は成功している */ }
+  const body = { name: doc.name.trim(), description: doc.description, file };
+  if (doc.publishedId) {
+    try {
+      const res = await updateServer(doc.publishedId, body, passphrase);
+      return { id: (res && res.server && res.server.id) || doc.publishedId, replaced: true, size: bytes.length };
+    } catch (e) {
+      if (e.status !== 404 && e.status !== 405) throw e;
+    }
   }
-  return { id, replaced, size: bytes.length };
+  const res = await addServer(body, passphrase);
+  return { id: (res && res.server && res.server.id) || null, replaced: false, size: bytes.length };
 }

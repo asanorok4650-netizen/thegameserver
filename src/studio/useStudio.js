@@ -131,10 +131,10 @@ export function useStudio() {
     if (!CONFIG.adminPassphrase) return say('設定ページで管理用の合言葉を入力してください。', 'error');
     setBusy(true); say('公開中…');
     try {
-      const r = await publishDoc(d, CONFIG.adminPassphrase, { replace: true });
+      const r = await publishDoc(d, CONFIG.adminPassphrase);
       setH((p) => markSaved(commit(p, setMeta(p.present, { publishedId: r.id }), { key: 'publish' })));
       saveDraft({ ...hRef.current.present, publishedId: r.id });
-      say(`公開しました(${(r.size / 1048576).toFixed(2)}MB)${r.replaced ? ' / 以前の公開を置き換えました' : ''}`, 'ok');
+      say(`公開しました(${(r.size / 1048576).toFixed(2)}MB)${r.replaced ? ' / 公開済みのワールドを更新しました' : ''}`, 'ok');
     } catch (e) {
       const { describeError } = await import('../servers/api.js');
       say(describeError(e), 'error');

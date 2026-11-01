@@ -142,7 +142,7 @@ export default function StudioPage({ onExit }) {
 
   function confirmPublish() {
     if (check.errors.length) { st.say(check.errors.join(' / '), 'error'); return; }
-    const lines = [`「${doc.name}」を公開します。`, doc.publishedId ? '以前の公開は新しいものに置き換わります。' : '', ...check.warnings.map((w) => '・' + w)].filter(Boolean);
+    const lines = [`「${doc.name}」を公開します。`, doc.publishedId ? '公開済みのワールドを更新します。' : '', ...check.warnings.map((w) => '・' + w)].filter(Boolean);
     if (window.confirm(lines.join('\n'))) st.publish();
   }
 
