@@ -7,6 +7,7 @@ import ServersSection from './components/ServersSection.jsx';
 import PlaceholderSection from './components/PlaceholderSection.jsx';
 import AvatarSection from './components/AvatarSection.jsx';
 import SettingsSection from './components/SettingsSection.jsx';
+import GameView from './components/GameView.jsx';
 import { useAvatar } from './hooks/useAvatar.js';
 
 export default function App() {
@@ -14,6 +15,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('');
+  const [playing, setPlaying] = useState(null);
   const servers = useServers();
   const avatar = useAvatar();
 
@@ -26,11 +28,13 @@ export default function App() {
   }
 
   function handleJoin(server) {
-    setStatus('「' + server.name + '」への参加機能は次の開発段階(0.4.x)で実装します。');
+    setStatus('');
+    setPlaying(server);
   }
 
   return (
     <div className="app-shell">
+      {playing && <GameView server={playing} desc={avatar.desc} onExit={() => setPlaying(null)} />}
       <Sidebar page={page} open={sidebarOpen} onNavigate={navigate} user={avatar.user} />
       <main className="main-area">
         <Topbar
