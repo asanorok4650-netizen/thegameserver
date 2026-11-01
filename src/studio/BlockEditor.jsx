@@ -72,14 +72,14 @@ function moveStep(root, source, targetPath) {
   return updateSequenceAtPath(without, adjustedTarget, (list) => [...list, moving]);
 }
 
-function StepSequence({ steps, path, onSequenceChange, onMove, depth = 0 }) {
+function StepSequence({ steps, path, onSequenceChange, onMove, ruleId, depth = 0 }) {
   const add = (step) => onSequenceChange(path, (list) => list.length >= RULE_LIMITS.maxSteps ? list : [...list, step]);
   const drop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     try {
       const source = JSON.parse(e.dataTransfer.getData('text/plain'));
-      onMove(source, path);
+      if (source.ruleId === ruleId) onMove(source, path);
     } catch (_) { /* ignore invalid drag payload */ }
   };
   return <div className="st-step-sequence">
@@ -88,7 +88,7 @@ function StepSequence({ steps, path, onSequenceChange, onMove, depth = 0 }) {
       const remove = () => onSequenceChange(path, (list) => list.filter((_, i) => i !== index));
       const dragStart = (e) => {
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', JSON.stringify({ path, index }));
+        e.dataTransfer.setData('text/plain', JSON.stringify({ ruleId, path, index }));
       };
       if (step.type === 'if') return <article className="st-step-item st-step-if" key={index} draggable onDragStart={dragStart}>
         <header className="st-step-head"><span className="st-step-grip" title="ドラッグして接続">⠿</span><strong>もし / そうでなければ</strong><span className="st-step-spacer"/><button type="button" onClick={remove}>削除</button></header>
@@ -97,11 +97,11 @@ function StepSequence({ steps, path, onSequenceChange, onMove, depth = 0 }) {
           <ExpressionBlock node={step.condition || createCompare()} onChange={(condition) => update({ condition })}/>
           <div className="st-step-branch">
             <strong>TRUE の場合</strong>
-            <StepSequence steps={step.then || []} path={[...path, { index, key: 'then' }]} onSequenceChange={onSequenceChange} onMove={onMove} depth={depth + 1}/>
+            <StepSequence steps={step.then || []} path={[...path, { index, key: 'then' }]} onSequenceChange={onSequenceChange} onMove={onMove} ruleId={ruleId} depth={depth + 1}/>
           </div>
           <div className="st-step-branch st-step-else">
             <strong>FALSE の場合</strong>
-            <StepSequence steps={step.else || []} path={[...path, { index, key: 'else' }]} onSequenceChange={onSequenceChange} onMove={onMove} depth={depth + 1}/>
+            <StepSequence steps={step.else || []} path={[...path, { index, key: 'else' }]} onSequenceChange={onSequenceChange} onMove={onMove} ruleId={ruleId} depth={depth + 1}/>
           </div>
         </div>
       </article>;
@@ -110,7 +110,7 @@ function StepSequence({ steps, path, onSequenceChange, onMove, depth = 0 }) {
         <div className="st-step-content">
           <label className="st-step-label">回数（最大 {RULE_LIMITS.maxRepeat} 回）<input type="number" min="0" max={RULE_LIMITS.maxRepeat} value={step.count} onChange={(e) => update({ count: Math.max(0, Math.min(RULE_LIMITS.maxRepeat, Number(e.target.value) || 0)) })}/></label>
           <div className="st-step-branch"><strong>繰り返す内容</strong>
-            <StepSequence steps={step.body || []} path={[...path, { index, key: 'body' }]} onSequenceChange={onSequenceChange} onMove={onMove} depth={depth + 1}/>
+            <StepSequence steps={step.body || []} path={[...path, { index, key: 'body' }]} onSequenceChange={onSequenceChange} onMove={onMove} ruleId={ruleId} depth={depth + 1}/>
           </div>
         </div>
       </article>;
@@ -178,7 +178,7 @@ export default function BlockEditor({ rules, parts, onChange }) {
           </section>
           <span className="st-flow-arrow">→</span>
           <section className="st-code-block action"><div className="st-code-block-title"><b>▶ 制御・アクション</b></div>
-            <StepSequence steps={Array.isArray(rule.steps) ? rule.steps : (rule.actions || [])} path={[]} onSequenceChange={(path, updater) => sequenceChange(ri, path, updater)} onMove={(source, targetPath) => move(ri, source, targetPath)}/>
+            <StepSequence steps={Array.isArray(rule.steps) ? rule.steps : (rule.actions || [])} path={[]} ruleId={rule.id} onSequenceChange={(path, updater) => sequenceChange(ri, path, updater)} onMove={(source, targetPath) => move(ri, source, targetPath)}/>
           </section>
         </div>
       </article>)}
