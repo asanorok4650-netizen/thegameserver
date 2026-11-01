@@ -8,41 +8,60 @@ function registerBlocks() {
   if (registered) return;
   registered = true;
   const definitions = [
+    // Events: hats are roots, but expose a next connection for their script.
     { type: 'rbxl_when_start', message0: 'ゲームが始まったとき', hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_touch', message0: 'パーツ %1 に触れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', nextStatement: null, colour: 25 },
+    { type: 'rbxl_when_player_spawn', message0: 'プレイヤーがスポーンしたとき', hat: 'cap', nextStatement: null, colour: 25 },
+    { type: 'rbxl_when_interval', message0: '%1 秒ごと', args0: [{ type: 'field_number', name: 'SECONDS', value: 1, min: 0.1, max: 3600, precision: 0.1 }], hat: 'cap', nextStatement: null, colour: 25 },
+
+    // Control flow.
     { type: 'rbxl_wait', message0: '%1 秒待つ', args0: [{ type: 'input_value', name: 'SECONDS', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 40 },
     { type: 'rbxl_if', message0: 'もし %1 なら %2', args0: [{ type: 'input_value', name: 'CONDITION', check: 'Boolean' }, { type: 'input_statement', name: 'DO' }], previousStatement: null, nextStatement: null, colour: 40 },
+    { type: 'rbxl_if_else', message0: 'もし %1 なら %2 でなければ %3', args0: [{ type: 'input_value', name: 'CONDITION', check: 'Boolean' }, { type: 'input_statement', name: 'DO' }, { type: 'input_statement', name: 'ELSE' }], previousStatement: null, nextStatement: null, colour: 40 },
     { type: 'rbxl_repeat', message0: '%1 回繰り返す %2', args0: [{ type: 'field_number', name: 'TIMES', value: 10, min: 0, max: 1000, precision: 1 }, { type: 'input_statement', name: 'DO' }], previousStatement: null, nextStatement: null, colour: 40 },
+    { type: 'rbxl_forever', message0: 'ずっと繰り返す %1', args0: [{ type: 'input_statement', name: 'DO' }], previousStatement: null, nextStatement: null, colour: 40 },
+
+    // Actions.
     { type: 'rbxl_add_score', message0: 'スコアを %1 増やす', args0: [{ type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_show_message', message0: 'メッセージ %1 を表示', args0: [{ type: 'field_input', name: 'TEXT', text: 'こんにちは！' }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_visible', message0: 'パーツ %1 を表示 %2', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_checkbox', name: 'VISIBLE', checked: true }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_move_part', message0: 'パーツ %1 の位置を X %2 Y %3 Z %4 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'X', value: 0 }, { type: 'field_number', name: 'Y', value: 0 }, { type: 'field_number', name: 'Z', value: 0 }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_set_checkpoint', message0: 'チェックポイントを設定する', previousStatement: null, nextStatement: null, colour: 145 },
+
+    // Variables. Keep the Phase 1 text-name block for saved-workspace compatibility.
     { type: 'rbxl_set_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_input', name: 'NAME', text: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
-    { type: 'rbxl_compare', message0: '%1 %2 %3', args0: [{ type: 'input_value', name: 'A', check: 'Number' }, { type: 'field_dropdown', name: 'OP', options: [['=', 'EQ'], ['>', 'GT'], ['<', 'LT'], ['≧', 'GTE'], ['≦', 'LTE']] }, { type: 'input_value', name: 'B', check: 'Number' }], output: 'Boolean', colour: 210 },
-    { type: 'rbxl_number', message0: '%1', args0: [{ type: 'field_number', name: 'VALUE', value: 0 }], output: 'Number', colour: 210 },
-    { type: 'rbxl_part_visible', message0: 'パーツ %1 を表示 %2', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_checkbox', name: 'VISIBLE', checked: true }], previousStatement: null, nextStatement: null, colour: 145 }
+    { type: 'rbxl_set_named_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_variable', name: 'VAR', variable: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
+    { type: 'rbxl_change_variable', message0: '変数 %1 を %2 だけ増やす', args0: [{ type: 'field_variable', name: 'VAR', variable: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
+
+    // Values and logic.
+    { type: 'rbxl_compare', message0: '%1 %2 %3', args0: [{ type: 'input_value', name: 'A', check: 'Number' }, { type: 'field_dropdown', name: 'OP', options: [['=', 'EQ'], ['>', 'GT'], ['<', 'LT'], ['≧', 'GTE'], ['≦', 'LTE'], ['≠', 'NEQ']] }, { type: 'input_value', name: 'B', check: 'Number' }], output: 'Boolean', colour: 210 },
+    { type: 'rbxl_number', message0: '%1', args0: [{ type: 'field_number', name: 'VALUE', value: 0 }], output: 'Number', colour: 210 }
   ];
   Blockly.common.defineBlocksWithJsonArray(definitions);
 }
 
+const block = (type) => ({ kind: 'block', type });
 const toolbox = {
   kind: 'categoryToolbox',
   contents: [
     { kind: 'category', name: 'イベント', colour: '#e6a23c', contents: [
-      { kind: 'block', type: 'rbxl_when_start' }, { kind: 'block', type: 'rbxl_when_touch' }
+      block('rbxl_when_start'), block('rbxl_when_touch'), block('rbxl_when_player_spawn'), block('rbxl_when_interval')
     ] },
     { kind: 'category', name: '制御', colour: '#d6a23a', contents: [
-      { kind: 'block', type: 'rbxl_wait' }, { kind: 'block', type: 'rbxl_if' }, { kind: 'block', type: 'rbxl_repeat' }
+      block('rbxl_wait'), block('rbxl_if'), block('rbxl_if_else'), block('rbxl_repeat'), block('rbxl_forever')
     ] },
     { kind: 'category', name: 'アクション', colour: '#43a879', contents: [
-      { kind: 'block', type: 'rbxl_add_score' }, { kind: 'block', type: 'rbxl_show_message' }, { kind: 'block', type: 'rbxl_part_visible' }
+      block('rbxl_add_score'), block('rbxl_show_message'), block('rbxl_part_visible'),
+      block('rbxl_move_part'), block('rbxl_set_checkpoint')
     ] },
     { kind: 'category', name: '変数', colour: '#a879ce', custom: 'VARIABLE' },
     { kind: 'category', name: '計算・条件', colour: '#5796d2', contents: [
-      { kind: 'block', type: 'rbxl_number' }, { kind: 'block', type: 'rbxl_compare' },
-      { kind: 'block', type: 'math_number' }, { kind: 'block', type: 'logic_compare' }, { kind: 'block', type: 'logic_boolean' }
+      block('rbxl_number'), block('rbxl_compare'), block('math_number'), block('math_arithmetic'),
+      block('logic_compare'), block('logic_operation'), block('logic_negate'), block('logic_boolean')
     ] },
     { kind: 'category', name: '標準ブロック', colour: '#8793a5', contents: [
-      { kind: 'block', type: 'controls_if' }, { kind: 'block', type: 'controls_repeat_ext' },
-      { kind: 'block', type: 'math_arithmetic' }, { kind: 'block', type: 'text' }
+      block('controls_if'), block('controls_repeat_ext'), block('controls_whileUntil'),
+      block('math_single'), block('math_modulo'), block('text')
     ] }
   ]
 };
