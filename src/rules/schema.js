@@ -115,6 +115,7 @@ function inspectAction(action, path, references, errors) {
   if (!object(action) || !ACTION_TYPES.some((x) => x.id === action.type)) { errors.push(path + ': 未対応のアクションです'); return; }
   if (action.type === 'set_variable' || action.type === 'change_variable') {
     if (typeof action.name !== 'string' || !action.name) errors.push(path + ': 代入先の変数名を入力してください');
+    else if (action.name === 'score') errors.push(path + ': score は読み取り専用です。スコア加算ブロックを使ってください');
     else references.push({ name: action.name, path });
   }
   if (action.expression) inspectExpression(action.expression, path + '.式', references, errors);
