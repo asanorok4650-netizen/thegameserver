@@ -9,6 +9,7 @@ import FieldForm from './FieldForm.jsx';
 import { BEHAVIOR_LIST, BEHAVIORS, resolveBehavior } from '../behaviors/index.js';
 import { RULE_FIELDS, ENV_FIELDS, defaultRules, defaultEnvironment } from '../game/rules.js';
 import RulesSection from './RulesSection.jsx';
+import BlockEditor from './BlockEditor.jsx';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
@@ -105,6 +106,7 @@ export default function StudioPage({ onExit }) {
   const vpRef = useRef(null);
   const fileRef = useRef(null);
   const [tab, setTab] = useState('select');
+  const [workspace, setWorkspace] = useState('3d');
   const [grid, setGrid] = useState(1);
   const [filter, setFilter] = useState('');
   const sel = new Set(selection);
@@ -180,6 +182,10 @@ export default function StudioPage({ onExit }) {
         <button className="game-chip st-chip" onClick={leave}>← 戻る</button>
         <strong className="st-title">{doc.name}{st.dirty ? ' •' : ''}</strong>
         <span className="st-spacer" />
+        <div className="st-workspace-switch" role="group" aria-label="中央エリア">
+          <button type="button" className={`st-workspace-tab${workspace === '3d' ? ' active' : ''}`} onClick={() => setWorkspace('3d')}>▦ 3Dビュー</button>
+          <button type="button" className={`st-workspace-tab${workspace === 'blocks' ? ' active' : ''}`} onClick={() => setWorkspace('blocks')}>▣ ブロック</button>
+        </div>
         <button className="st-btn" disabled={!st.canUndo} onClick={actions.undo} title="元に戻す (Ctrl+Z)">↶</button>
         <button className="st-btn" disabled={!st.canRedo} onClick={actions.redo} title="やり直す (Ctrl+Y)">↷</button>
         <select className="st-select" value={grid} onChange={(e) => setGrid(Number(e.target.value))} aria-label="グリッド">
@@ -194,12 +200,17 @@ export default function StudioPage({ onExit }) {
 
       <div className="studio-body">
         <div className="studio-view">
-          <div className="studio-canvas" ref={hostRef} />
-          <div className="studio-addbar">
-            {[...SHAPES].map((s) => <button key={s} className="game-chip" onClick={() => addShape(s)}>＋{SHAPE_LABEL[s]}</button>)}
-            <button className="game-chip" onClick={() => vpRef.current && vpRef.current.focusAll()}>全体</button>
+          <div className={`studio-canvas${workspace === '3d' ? '' : ' is-hidden'}`} ref={hostRef} />
+          <div className={`studio-block-canvas${workspace === 'blocks' ? '' : ' is-hidden'}`}>
+            <BlockEditor rules={doc.eventRules || []} parts={doc.parts} onChange={actions.eventRules} />
           </div>
-          <div className="studio-hint">ドラッグ: 回転 / Shift+ドラッグ・2本指: 移動 / ホイール・ピンチ: ズーム / タップ: 選択(Shift: 追加)</div>
+          {workspace === '3d' && <>
+            <div className="studio-addbar">
+              {[...SHAPES].map((s) => <button key={s} className="game-chip" onClick={() => addShape(s)}>＋{SHAPE_LABEL[s]}</button>)}
+              <button className="game-chip" onClick={() => vpRef.current && vpRef.current.focusAll()}>全体</button>
+            </div>
+            <div className="studio-hint">ドラッグ: 回転 / Shift+ドラッグ・2本指: 移動 / ホイール・ピンチ: ズーム / タップ: 選択(Shift: 追加)</div>
+          </>}
         </div>
 
         <aside className="studio-side">
