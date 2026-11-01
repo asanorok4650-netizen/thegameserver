@@ -92,6 +92,7 @@ export function useStudio() {
     nudge: (ids, delta) => apply((d) => movePartsBy(d, ids, delta), 'nudge'),
     meta: (p, key) => apply((d) => setMeta(d, p), key || 'meta'),
     rules: (patch, key) => apply((d) => setRules(d, patch), key || 'rules'),
+    eventRules: (rules) => apply((d) => ({ ...d, eventRules: rules }), 'event-rules'),
     environment: (patch, key) => apply((d) => setEnvironment(d, patch), key || 'env'),
     behavior: (ids, id) => apply((d) => setPartBehavior(d, ids, id)),
     behaviorParam: (id, key, value) => apply((d) => setPartBehaviorParam(d, id, key, value), 'bparam-' + id + '-' + key),
