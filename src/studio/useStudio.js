@@ -88,6 +88,7 @@ export function useStudio() {
     meta: (p, key) => apply((d) => setMeta(d, p), key || 'meta'),
     rules: (patch, key) => apply((d) => setRules(d, patch), key || 'rules'),
     eventRules: (rules) => apply((d) => ({ ...d, eventRules: rules }), 'event-rules'),
+    scripting: (scripting) => apply((d) => ({ ...d, scripting }), 'scripting-workspace'),
     environment: (patch, key) => apply((d) => setEnvironment(d, patch), key || 'env'),
     behavior: (ids, id) => apply((d) => setPartBehavior(d, ids, id)),
     behaviorParam: (id, key, value) => apply((d) => setPartBehaviorParam(d, id, key, value), 'bparam-' + id + '-' + key),
