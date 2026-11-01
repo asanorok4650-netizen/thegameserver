@@ -107,5 +107,21 @@ export default function BlocklyEditor({ initialState, onChange }) {
     };
   }, []);
 
+  const lastExternalState = useRef(initialState);
+  useEffect(() => {
+    if (lastExternalState.current === initialState) return;
+    lastExternalState.current = initialState;
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    try {
+      const current = Blockly.serialization.workspaces.save(workspace);
+      if (JSON.stringify(current) === JSON.stringify(initialState || {})) return;
+      workspace.clear();
+      if (initialState && typeof initialState === 'object') Blockly.serialization.workspaces.load(initialState, workspace);
+    } catch (error) {
+      console.warn('Blockly workspace could not be updated:', error);
+    }
+  }, [initialState]);
+
   return <div className="rbxl-blockly-editor" ref={hostRef} aria-label="Blocklyプログラミングワークスペース" />;
 }
