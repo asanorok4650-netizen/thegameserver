@@ -7,6 +7,7 @@ import { makeAnimator } from './character.js';
 import { disposeWorld } from './world.js';
 import { sphereIntersectsOBB } from './collision.js';
 import { createLogicRuntime } from '../logics/index.js';
+import { createRuleRuntime } from '../rules/runtime.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
@@ -43,6 +44,7 @@ export class Game {
     this.jumpHeld = false;
     this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.initialSpawn = this.spawn.slice();
     this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
+    this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.activeRuleTriggers = new Set();
     this.activeTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
@@ -115,7 +117,7 @@ export class Game {
   setWorld(world) {
     this.world = world; this.collision = world.collision;
     if (world.environment) this.setEnvironment(world.environment);
-    this.spawn = world.spawn.slice(); this.initialSpawn = world.spawn.slice();
+    this.spawn = world.spawn.slice(); this.initialSpawn = world.spawn.slice();\n    this._createRuleRuntime();
     this.scene.add(world.group);
     const b = world.collision.bounds();
     this.minY = b ? Math.min(-500, b.min[1] - 300) : -500;
@@ -139,13 +141,13 @@ export class Game {
     this.p.set(this.spawn[0], this.spawn[1], this.spawn[2]);
     this.vel.set(0, 0, 0);
     this.grounded = false;
-    this.activeTriggers.clear();
+    this.activeTriggers.clear();\n    this.activeRuleTriggers.clear();
   }
 
   restart() {
     this.completed = false;
     this.spawn = this.initialSpawn.slice();
-    this.logicRuntime?.reset?.();
+    this.logicRuntime?.reset?.();\n    this.ruleRuntime?.reset?.();
     this.keys.clear();
     this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
     this.respawn();
@@ -161,7 +163,7 @@ export class Game {
   }
 
   _checkTriggers() {
-    if (!this.logicRuntime || !this.world?.triggers?.length || this.completed) return;
+    if ((!this.logicRuntime && !this.ruleRuntime?.usesContactEvents) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
     const now = new Set();
     for (const trigger of this.world.triggers) {
       let touching = false;
@@ -181,7 +183,7 @@ export class Game {
       }
       if (this.completed) break;
     }
-    this.activeTriggers = now;
+    this.activeTriggers = now;\n    if (this.ruleRuntime?.usesContactEvents && this.world?.ruleTriggers?.length) {\n      const active = new Set();\n      const watched = this.ruleRuntime.watchedPartIds();\n      for (const trigger of this.world.ruleTriggers) {\n        if (watched && !watched.has(trigger.id)) continue;\n        let touching = false;\n        for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }\n        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onTouch(trigger); }\n        else if (this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onLeave(trigger);\n      }\n      this.activeRuleTriggers = active;\n    }
   }
 
   update(dt) {
@@ -228,7 +230,7 @@ export class Game {
     this.grounded = grounded;
     this.floor = grounded ? floorNow : null; // 今乗っている衝突体(動く床・コンベア用)
     this._checkTriggers();
-    this.logicRuntime?.update?.({ position: this.p, dt });
+    this.logicRuntime?.update?.({ position: this.p, dt });\n    this.ruleRuntime?.update?.(dt);
     if (this.holder) {
       this.holder.position.copy(this.p);
       this.holder.rotation.y = this.heading;
