@@ -4,7 +4,7 @@ import { resolveRules, defaultRules, resolveEnvironment, defaultEnvironment, dif
 import { resolveBehavior, setBehavior, poseAt, BEHAVIORS, isMotion, axisRot } from '../src/behaviors/index.js';
 import { Dynamics } from '../src/game/dynamics.js';
 import { CollisionWorld } from '../src/game/collision.js';
-import { createDoc, setRules, setEnvironment, setPartBehavior, setPartBehaviorParam, addPart, docToPackage, docFromPackage } from '../src/studio/model.js';
+import { normalizeDoc, createDoc, setRules, setEnvironment, setPartBehavior, setPartBehaviorParam, addPart, docToPackage, docFromPackage } from '../src/studio/model.js';
 import { validateManifest, validateWorld } from '../src/tgw/validate.js';
 
 const close = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} ≈ ${b}`);
@@ -161,5 +161,40 @@ close(floor.max[0], 0.5); close(floor.max[1], 10);
 assert.throws(() => validateManifest({ formatVersion: '1.0', name: 'x', world: { file: 'world.json' }, rules: [1] }), /rules/);
 assert.throws(() => validateWorld({ formatVersion: '1.0', parts: [], environment: 3 }), /environment/);
 assert.ok(Object.keys(BEHAVIORS).length === 4);
+
+// ---- 古い下書き(rules / environment が無い版で保存したもの)でも落ちない ----
+{
+  const old = {
+    name: '古い下書き', description: '', players: { max: 8, sendHz: 10 }, logic: null,
+    spawns: [{ pos: [0, 1, 0], size: [6, 1, 6] }],
+    parts: [{ id: 'p1', name: 'Baseplate', shape: 'block', size: [10, 1, 10], pos: [0, 0, 0], rot: I, color: '#6b8e4e', transparency: 0, collide: true }],
+    nextId: 2, source: null, publishedId: null
+  };
+  const doc = normalizeDoc(old);
+  assert.deepEqual(doc.rules, defaultRules());
+  assert.deepEqual(doc.environment, defaultEnvironment());
+  assert.deepEqual(doc.parts[0].tags, []);
+  assert.deepEqual(doc.parts[0].attrs, {});
+  assert.equal(old.rules, undefined, '入力は書き換えない');
+  assert.equal(doc.nextId, 2);
+  const pk = docToPackage(doc);              // 公開・書き出しで落ちない
+  assert.equal(pk.manifest.rules, undefined);
+  docToPackage(old);                         // 正規化し忘れたdocでも落ちない(多重防御)
+  assert.deepEqual(setRules(old, { gravity: 10 }).rules.gravity, 10);
+  assert.deepEqual(setEnvironment(old, { ambient: 2 }).environment.ambient, 2);
+  assert.doesNotThrow(() => normalizeDoc(null));
+  assert.doesNotThrow(() => normalizeDoc({ parts: 'x' }));
+}
+
+// ---- エラー表示: 原因を取り違えない ----
+{
+  const { describeError } = await import('../src/servers/api.js');
+  assert.match(describeError(new TypeError('Failed to fetch')), /CORS/);
+  const e500 = Object.assign(new Error('internal'), { status: 500, detail: 'D1_ERROR: no such table' });
+  assert.match(describeError(e500), /HTTP 500.*internal.*no such table/);
+  assert.match(describeError(new Error('パーツがありません')), /^パーツがありません$/, '送る前の失敗は接続エラー扱いにしない');
+  assert.match(describeError(Object.assign(new Error('unauthorized'), { status: 401 })), /合言葉/);
+  assert.match(describeError(Object.assign(new Error('bad_format'), { status: 400 })), /再デプロイ/);
+}
 
 console.log('rules.test: OK');

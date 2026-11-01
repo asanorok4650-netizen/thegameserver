@@ -2,7 +2,8 @@
 // スマホで触りやすいよう、数値はスライダー + 入力欄の組にする。範囲は定義の min/max。
 const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
 
-export default function FieldForm({ fields, values, onChange, keyPrefix = '' }) {
+export default function FieldForm({ fields, values: given, onChange, keyPrefix = '' }) {
+  const values = given || {};
   return (
     <>
       {Object.entries(fields).map(([k, f]) => {

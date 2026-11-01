@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   addPart, removeParts, duplicateParts, updateParts, movePartsBy, setMeta, createStarterDoc, checkDoc, addSpawn, removeSpawn,
-  setRules, setEnvironment, setPartBehavior, setPartBehaviorParam
+  setRules, setEnvironment, setPartBehavior, setPartBehaviorParam, normalizeDoc
 } from './model.js';
 import { createHistory, commit, undo, redo, canUndo, canRedo, markSaved, isDirty, reset } from './history.js';
 import { loadDraft, saveDraft, clearDraft } from './storage.js';
@@ -27,7 +27,7 @@ export function useStudio() {
     loadDraft().then((d) => {
       if (dead) return;
       if (d && d.doc && Array.isArray(d.doc.parts)) {
-        setH((prev) => markSaved(reset(prev, d.doc)));
+        setH((prev) => markSaved(reset(prev, normalizeDoc(d.doc))));
         say('前回の下書きを復元しました', 'ok');
       }
       setReady(true);
@@ -142,6 +142,7 @@ export function useStudio() {
       say(`公開しました(${(r.size / 1048576).toFixed(2)}MB)${r.replaced ? ' / 公開済みのワールドを更新しました' : ''}`, 'ok');
     } catch (e) {
       const { describeError } = await import('../servers/api.js');
+      console.error('publish failed', e);
       say(describeError(e), 'error');
     } finally { setBusy(false); }
   }, [say]);
