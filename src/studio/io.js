@@ -3,7 +3,6 @@ import { docToPackage, docFromPackage, checkDoc } from './model.js';
 import { addServer, updateServer } from '../servers/api.js';
 import { loadWorldPackage } from '../game/loader.js';
 
-/** .tgw のバイト列を作る(fflate は使う時だけ読み込む) */
 export async function buildDocTgw(doc, extra = {}) {
   const { buildTgw } = await import('../tgw/container.js');
   const { manifest, worldJson } = docToPackage(doc, extra);
@@ -12,8 +11,9 @@ export async function buildDocTgw(doc, extra = {}) {
 
 const safeName = (s) => (s || 'world').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 60) || 'world';
 
-/** ブラウザのダウンロードとして書き出す(通信なし) */
 export async function downloadTgw(doc) {
+  const { errors } = checkDoc(doc);
+  if (errors.length) throw new Error(errors.join(' / '));
   const bytes = await buildDocTgw(doc);
   const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' }));
   const a = document.createElement('a');
@@ -23,7 +23,6 @@ export async function downloadTgw(doc) {
   return bytes.length;
 }
 
-/** .tgw / .rbxl のFileを開いてドキュメントにする(通信なし) */
 export async function openFile(file, log = () => {}) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const pkg = await loadWorldPackage(bytes, log);
@@ -32,12 +31,6 @@ export async function openFile(file, log = () => {}) {
   return { doc, warnings: pkg.warnings || [] };
 }
 
-/**
- * 公開(サーバーへのリクエストはここだけ)。
- * 公開済み(doc.publishedId あり)なら PUT で同じidのまま差し替える。
- * 一覧にもう無い(404)/Workerが古くてPUT未対応(405)の場合は、新規追加(POST)にする。
- * @returns { id, replaced, size }
- */
 export async function publishDoc(doc, passphrase) {
   const { errors } = checkDoc(doc);
   if (errors.length) throw new Error(errors.join(' / '));
