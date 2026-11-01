@@ -4,12 +4,13 @@ import { StudioViewport } from './viewport.js';
 import { checkDoc } from './model.js';
 import TransformFields from './Transform.jsx';
 import { SHAPES } from '../tgw/validate.js';
+import { LOGICS, getLogicDefinition, getLogicDefaults } from '../logics/index.js';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
 const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
 
-function Inspector({ parts, grid, onPatch, onRemove, onDuplicate }) {
+function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate }) {
   if (!parts.length) return <p className="st-empty">パーツを選ぶと、ここで編集できます。<br />(ビューでタップ / 「パーツ」タブから選択)</p>;
   const ids = parts.map((p) => p.id);
   const one = parts.length === 1 ? parts[0] : null;
@@ -40,9 +41,32 @@ function Inspector({ parts, grid, onPatch, onRemove, onDuplicate }) {
         <input type="range" min="0" max="1" step="0.05" value={first.transparency} onChange={(e) => onPatch(ids, { transparency: Number(e.target.value) }, 'alpha')} /></label>
       <label className="st-check"><input type="checkbox" checked={first.collide} onChange={(e) => onPatch(ids, { collide: e.target.checked })} /> 当たり判定あり</label>
       {one && (
-        <label className="st-field"><span className="st-label">タグ(カンマ区切り。ロジックが参照します)</span>
-          <input className="text-input" defaultValue={(one.tags || []).join(', ')} key={one.id}
-            onBlur={(e) => onPatch(ids, { tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })} /></label>
+        <div className="st-field">
+          <span className="st-label">ロジックタグ</span>
+          {logic?.tags?.length ? (
+            <div className="st-tag-options">
+              {logic.tags.map((tag) => (
+                <label className="st-tag-option" key={tag.id} title={tag.description || ''}>
+                  <input type="checkbox" checked={(one.tags || []).includes(tag.id)}
+                    onChange={(e) => {
+                      const current = new Set(one.tags || []);
+                      if (e.target.checked) current.add(tag.id); else current.delete(tag.id);
+                      onPatch(ids, { tags: [...current] }, 'tags-' + one.id);
+                    }} />
+                  <span><strong>{tag.label}</strong><small>{tag.id}</small></span>
+                </label>
+              ))}
+            </div>
+          ) : <p className="st-note">ワールド設定でロジックを選ぶと、利用できるタグが表示されます。</p>}
+          <label className="st-field"><span className="st-label">追加タグ(カンマ区切り)</span>
+            <input className="text-input" defaultValue={(one.tags || []).filter((t) => !logic?.tags?.some((x) => x.id === t)).join(', ')} key={one.id + '-custom-tags'}
+              onBlur={(e) => {
+                const custom = e.target.value.split(',').map((t) => t.trim()).filter(Boolean);
+                const known = (one.tags || []).filter((t) => logic?.tags?.some((x) => x.id === t));
+                onPatch(ids, { tags: [...known, ...custom] }, 'custom-tags-' + one.id);
+              }} />
+          </label>
+        </div>
       )}
     </div>
   );
@@ -159,7 +183,7 @@ export default function StudioPage({ onExit }) {
             ))}
           </div>
           <div className="st-panel">
-            {tab === 'select' && <Inspector parts={selected} grid={grid} onPatch={actions.patch} onRemove={actions.remove} onDuplicate={actions.duplicate} />}
+            {tab === 'select' && <Inspector parts={selected} grid={grid} logic={getLogicDefinition(doc.logic?.id)} onPatch={actions.patch} onRemove={actions.remove} onDuplicate={actions.duplicate} />}
             {tab === 'parts' && (
               <div>
                 <input className="text-input" placeholder="名前で絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -183,10 +207,39 @@ export default function StudioPage({ onExit }) {
                   <input className="text-input" value={doc.description} maxLength={300} onChange={(e) => actions.meta({ description: e.target.value }, 'wdesc')} /></label>
                 <label className="st-field"><span className="st-label">最大人数(1〜64)</span>
                   <input className="text-input st-num" type="number" min="1" max="64" value={doc.players.max} onChange={(e) => actions.meta({ players: { max: e.target.value } }, 'wmax')} /></label>
-                <label className="st-field"><span className="st-label">ロジックID(空 = なし)</span>
-                  <input className="text-input" list="st-logics" value={doc.logic ? doc.logic.id : ''} placeholder="例: obby"
-                    onChange={(e) => { const id = e.target.value.trim(); actions.meta({ logic: id ? { version: 1, params: {}, ...(doc.logic || {}), id } : null }, 'wlogic'); }} />
-                  <datalist id="st-logics"><option value="obby" /></datalist></label>
+                <label className="st-field"><span className="st-label">ゲームロジック</span>
+                  <select className="text-input" value={doc.logic?.id || 'none'} onChange={(e) => {
+                    const id = e.target.value;
+                    actions.meta({ logic: id === 'none' ? null : { id, version: 1, params: getLogicDefaults(id) } }, 'wlogic');
+                  }}>
+                    <option value="none">なし</option>
+                    {LOGICS.map((logic) => <option key={logic.id} value={logic.id}>{logic.name}</option>)}
+                  </select>
+                </label>
+                {doc.logic && (() => {
+                  const definition = getLogicDefinition(doc.logic.id);
+                  if (!definition) return <p className="st-note err">未登録のロジックID: {doc.logic.id} (.tgw内の設定は保持されます)</p>;
+                  return (
+                    <div className="st-logic-config">
+                      <strong>{definition.name}</strong>
+                      <p className="st-note">{definition.description}</p>
+                      {Object.entries(definition.parameters).map(([key, field]) => (
+                        <label className="st-field" key={key}>
+                          <span className="st-label">{field.label}</span>
+                          <input className="text-input st-num" type="number" min={field.min} max={field.max} step={field.step || 1}
+                            value={doc.logic?.params?.[key] ?? field.default}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? field.default : Number(e.target.value);
+                              const params = { ...(doc.logic?.params || {}), [key]: Number.isFinite(value) ? value : field.default };
+                              actions.meta({ logic: { ...doc.logic, version: 1, params } }, 'logic-param-' + key);
+                            }} />
+                          <span className="st-note">{field.description}</span>
+                        </label>
+                      ))}
+                      <p className="st-note">利用できるパーツタグ: {definition.tags.map((tag) => tag.id).join(' / ')}</p>
+                    </div>
+                  );
+                })()}
                 <div className="st-row"><span className="st-label">スポーン {doc.spawns.length}個</span><span className="st-spacer" />
                   <button className="secondary-button" type="button" onClick={() => { const t = vpRef.current ? vpRef.current.getTarget() : [0, 0, 0]; actions.addSpawn([Math.round(t[0]), Math.round(t[1]) + 0.5, Math.round(t[2])]); }}>画面中央に追加</button>
                   <button className="secondary-button" type="button" disabled={!doc.spawns.length} onClick={() => actions.removeSpawn(doc.spawns.length - 1)}>最後を削除</button></div>

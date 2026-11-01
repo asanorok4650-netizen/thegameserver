@@ -59,3 +59,12 @@
 .st-axis{font:800 11px inherit;color:#7787ca;text-align:center}
 .st-range{width:100%;min-width:0;height:28px;margin:0;accent-color:#335cff;touch-action:pan-y}
 @media(pointer:coarse){.st-range{height:36px}}
+
+
+/* ロジック設定・タグ選択 */
+.st-logic-config{display:grid;gap:10px;padding:11px;background:#f7f8fb;border:1px solid #e8eaf0;border-radius:10px}
+.st-tag-options{display:grid;gap:6px}
+.st-tag-option{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid #e8eaf0;border-radius:8px;background:#fafbfe;font-size:12px;cursor:pointer}
+.st-tag-option input{accent-color:#335cff}
+.st-tag-option span{display:grid;gap:2px}
+.st-tag-option small{font-size:10px;color:#858793}

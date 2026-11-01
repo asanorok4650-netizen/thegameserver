@@ -32,7 +32,7 @@ export class Game {
     this.keys = new Set();
     this.joy = { x: 0, y: 0 };
     this.jumpHeld = false;
-    this.world = null; this.collision = null; this.spawn = [0, 10, 0];
+    this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.logic = null;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
     this.minY = -500;
@@ -72,6 +72,8 @@ export class Game {
     this.yaw -= dx * 0.006;
     this.pitch = Math.min(1.35, Math.max(-0.2, this.pitch + dy * 0.006));
   }
+
+  setLogic(logic) { this.logic = logic || null; }
 
   setWorld(world) {
     this.world = world; this.collision = world.collision; this.spawn = world.spawn;

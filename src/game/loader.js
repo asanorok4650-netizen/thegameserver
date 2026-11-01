@@ -2,6 +2,7 @@
 import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
 import { treeToWorldJson } from '../tgw/worldjson.js';
 import { hasZipMagic } from '../tgw/validate.js';
+import { resolveLogicConfig } from '../logics/index.js';
 
 /** 進捗つきでダウンロード。total はサーバー一覧のサイズ(Content-Lengthは使えないため) */
 export async function fetchServerFile(url, total, onProgress, signal) {
@@ -51,12 +52,12 @@ export async function loadWorldPackage(bytes, log = () => {}) {
     const { manifest, worldJson } = readTgw(bytes);
     const src = manifest.source || {};
     return {
-      format, worldJson, manifest, warnings: [],
+      format, worldJson, manifest, logic: resolveLogicConfig(manifest.logic), warnings: [],
       report: { approx: src.approx || {}, ignored: src.ignored || {}, spawnFound: (worldJson.spawns || []).length > 0 },
       info: `.tgw「${manifest.name}」 パーツ ${worldJson.parts.length}個`
     };
   }
   const tree = parseRbxl(bytes);
   const { worldJson, report } = treeToWorldJson(tree, log);
-  return { format, worldJson, manifest: null, report, warnings: tree.warnings, info: `rbxl インスタンス ${tree.instances.size}個` };
+  return { format, worldJson, manifest: null, logic: resolveLogicConfig(null), report, warnings: tree.warnings, info: `rbxl インスタンス ${tree.instances.size}個` };
 }

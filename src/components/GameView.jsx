@@ -42,6 +42,8 @@ export default function GameView({ server, desc, onExit }) {
         await tick();
         const pkg = await loadWorldPackage(bytes, log);
         log('ok', `解析完了: ${pkg.info}`);
+        if (pkg.logic?.definition) log('ok', `ロジックを読み込み: ${pkg.logic.definition.name}`);
+        else if (pkg.logic?.warning) log('warn', pkg.logic.warning);
         for (const w of pkg.warnings.slice(0, 5)) log('warn', w);
         if (pkg.warnings.length > 5) log('warn', `ほか警告 ${pkg.warnings.length - 5}件`);
         await tick();
@@ -55,6 +57,7 @@ export default function GameView({ server, desc, onExit }) {
         if (!s.spawnFound) log('warn', 'SpawnLocationがありません。原点付近から開始します');
         for (const [k, v] of Object.entries(pkg.report.ignored)) log('warn', `${k} ${v}件は未対応のため表示されません`);
         for (const [k, v] of Object.entries(pkg.report.approx)) log('warn', `${k} ${v}個は箱の形で代用しています`);
+        game.setLogic(pkg.logic);
         game.setWorld(world);
 
         log('info', 'キャラクターを配置中…');
