@@ -5,12 +5,36 @@ import { checkDoc } from './model.js';
 import TransformFields from './Transform.jsx';
 import { SHAPES } from '../tgw/validate.js';
 import { LOGICS, getLogicDefinition, getLogicDefaults } from '../logics/index.js';
+import FieldForm from './FieldForm.jsx';
+import { BEHAVIOR_LIST, BEHAVIORS, resolveBehavior } from '../behaviors/index.js';
+import { RULE_FIELDS, ENV_FIELDS, defaultRules, defaultEnvironment } from '../game/rules.js';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
 const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
 
-function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate }) {
+function BehaviorSection({ part, ids, onBehavior, onParam }) {
+  const b = resolveBehavior(part.attrs);
+  const def = b ? BEHAVIORS[b.id] : null;
+  return (
+    <div className="st-field">
+      <span className="st-label">振る舞い</span>
+      <select className="text-input" value={b ? b.id : ''} onChange={(e) => onBehavior(ids, e.target.value)}>
+        <option value="">なし</option>
+        {BEHAVIOR_LIST.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+      </select>
+      {def && (
+        <div className="st-logic-config">
+          <p className="st-note">{def.description}</p>
+          <FieldForm fields={def.params} values={b.params} keyPrefix={part.id + '-'} onChange={(k, v) => onParam(part.id, k, v)} />
+          {!part.collide && def.kind === 'effect' && <p className="st-note warn">⚠ 「当たり判定あり」をオンにしないと、乗れないので効果が出ません。</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate, onBehavior, onParam }) {
   if (!parts.length) return <p className="st-empty">パーツを選ぶと、ここで編集できます。<br />(ビューでタップ / 「パーツ」タブから選択)</p>;
   const ids = parts.map((p) => p.id);
   const one = parts.length === 1 ? parts[0] : null;
@@ -40,6 +64,7 @@ function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate }) {
       <label className="st-field"><span className="st-label">透明度 {fmt(first.transparency)}</span>
         <input type="range" min="0" max="1" step="0.05" value={first.transparency} onChange={(e) => onPatch(ids, { transparency: Number(e.target.value) }, 'alpha')} /></label>
       <label className="st-check"><input type="checkbox" checked={first.collide} onChange={(e) => onPatch(ids, { collide: e.target.checked })} /> 当たり判定あり</label>
+      {one && <BehaviorSection part={one} ids={ids} onBehavior={onBehavior} onParam={onParam} />}
       {one && (
         <div className="st-field">
           <span className="st-label">ロジックタグ</span>
@@ -183,7 +208,7 @@ export default function StudioPage({ onExit }) {
             ))}
           </div>
           <div className="st-panel">
-            {tab === 'select' && <Inspector parts={selected} grid={grid} logic={getLogicDefinition(doc.logic?.id)} onPatch={actions.patch} onRemove={actions.remove} onDuplicate={actions.duplicate} />}
+            {tab === 'select' && <Inspector parts={selected} grid={grid} logic={getLogicDefinition(doc.logic?.id)} onPatch={actions.patch} onRemove={actions.remove} onDuplicate={actions.duplicate} onBehavior={actions.behavior} onParam={actions.behaviorParam} />}
             {tab === 'parts' && (
               <div>
                 <input className="text-input" placeholder="名前で絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
@@ -240,6 +265,20 @@ export default function StudioPage({ onExit }) {
                     </div>
                   );
                 })()}
+                <details className="st-details">
+                  <summary>物理ルール</summary>
+                  <div className="st-logic-config">
+                    <FieldForm fields={RULE_FIELDS} values={doc.rules} onChange={(k, v) => actions.rules({ [k]: v }, 'rule-' + k)} />
+                    <button className="secondary-button" type="button" onClick={() => actions.rules(defaultRules())}>既定値に戻す</button>
+                  </div>
+                </details>
+                <details className="st-details">
+                  <summary>空・光・霧</summary>
+                  <div className="st-logic-config">
+                    <FieldForm fields={ENV_FIELDS} values={doc.environment} onChange={(k, v) => actions.environment({ [k]: v }, 'env-' + k)} />
+                    <button className="secondary-button" type="button" onClick={() => actions.environment(defaultEnvironment())}>既定値に戻す</button>
+                  </div>
+                </details>
                 <div className="st-row"><span className="st-label">スポーン {doc.spawns.length}個</span><span className="st-spacer" />
                   <button className="secondary-button" type="button" onClick={() => { const t = vpRef.current ? vpRef.current.getTarget() : [0, 0, 0]; actions.addSpawn([Math.round(t[0]), Math.round(t[1]) + 0.5, Math.round(t[2])]); }}>画面中央に追加</button>
                   <button className="secondary-button" type="button" disabled={!doc.spawns.length} onClick={() => actions.removeSpawn(doc.spawns.length - 1)}>最後を削除</button></div>

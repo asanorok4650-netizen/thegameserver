@@ -4,6 +4,8 @@
 import { WORLD_FORMAT_VERSION, worldBounds } from '../tgw/worldjson.js';
 import { createManifest } from '../tgw/manifest.js';
 import { SHAPES } from '../tgw/validate.js';
+import { RULE_FIELDS, ENV_FIELDS, resolveRules, resolveEnvironment, diffFromDefault } from '../game/rules.js';
+import { resolveBehavior, setBehavior } from '../behaviors/index.js';
 
 export const IDENT = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
@@ -16,6 +18,8 @@ export function createDoc(opts = {}) {
     description: opts.description || '',
     players: { max: 8, sendHz: 10, ...(opts.players || {}) },
     logic: opts.logic || null,
+    rules: resolveRules(opts.rules),             // 物理(歩く速さ・ジャンプ力・重力)。常に検証済みの全項目
+    environment: resolveEnvironment(opts.environment), // 空・光・霧
     spawns: opts.spawns || [],
     parts: opts.parts || [],
     nextId: 1,
@@ -42,6 +46,8 @@ export function docFromPackage(pkg, fallbackName = 'Imported World') {
     description: m.description || '',
     players: m.players,
     logic: m.logic || null,
+    rules: m.rules,
+    environment: w.environment,
     spawns: (w.spawns || []).map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })),
     parts: w.parts.map(clonePart),
     source: m.source || (pkg.report ? { kind: pkg.format || 'rbxl', name: '', ignored: pkg.report.ignored || {}, approx: pkg.report.approx || {} } : null)
@@ -55,9 +61,11 @@ export function docToPackage(doc, extra = {}) {
     spawns: doc.spawns.map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })),
     parts: doc.parts.map(clonePart)
   };
+  const env = diffFromDefault(doc.environment, ENV_FIELDS);
+  if (env) worldJson.environment = env; // 既定値のままなら書かない
   const manifest = createManifest(worldJson, null, {
     name: doc.name, description: doc.description, author: extra.author || '',
-    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined
+    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, rules: diffFromDefault(doc.rules, RULE_FIELDS) || undefined
   });
   if (doc.source) manifest.source = doc.source;
   return { worldJson, manifest };
@@ -148,6 +156,25 @@ export function duplicateParts(doc, ids, offset = [2, 0, 2]) {
     d = r.doc; newIds.push(r.id);
   }
   return { doc: d, ids: newIds };
+}
+
+// ---- 物理ルール・環境(数値だけ。範囲外は丸め、不正値は無視) ----
+export function setRules(doc, patch) {
+  return { ...doc, rules: resolveRules({ ...doc.rules, ...patch }) };
+}
+export function setEnvironment(doc, patch) {
+  return { ...doc, environment: resolveEnvironment({ ...doc.environment, ...patch }) };
+}
+
+// ---- パーツの振る舞い(attrs.behavior とそのパラメータ) ----
+/** 選んだパーツ全部の振る舞いを切り替える。id が空なら外す */
+export function setPartBehavior(doc, ids, id) {
+  const set = new Set(ids);
+  return { ...doc, parts: doc.parts.map((p) => (set.has(p.id) ? { ...p, attrs: setBehavior(p.attrs, id) } : p)) };
+}
+/** 振る舞いのパラメータを1つ変える(範囲は resolveBehavior が表示・実行の両方で丸める) */
+export function setPartBehaviorParam(doc, id, key, value) {
+  return { ...doc, parts: doc.parts.map((p) => (p.id === id && resolveBehavior(p.attrs) ? { ...p, attrs: { ...p.attrs, [key]: value } } : p)) };
 }
 
 // ---- スポーン ----

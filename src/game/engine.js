@@ -7,8 +7,9 @@ import { makeAnimator } from './character.js';
 import { disposeWorld } from './world.js';
 import { sphereIntersectsOBB } from './collision.js';
 import { createLogicRuntime } from '../logics/index.js';
+import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
 
-const WALK = 16, JUMP = 50, GRAVITY = 196.2, RADIUS = 0.9;
+const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
 
 export class Game {
@@ -20,10 +21,15 @@ export class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9ec9ff);
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 4000);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f9c, 1.5));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-    sun.position.set(-0.4, 1, 0.6);
-    this.scene.add(sun);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x8a8f9c, 1.5);
+    this.scene.add(this.hemi);
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.6);
+    this.sunLight.position.set(-0.4, 1, 0.6);
+    this.scene.add(this.sunLight);
+    this.rules = defaultRules();
+    this.floor = null;
+    this.time = 0; // 動くパーツ用の経過時間(秒)。世界の時計なので復活・やり直しでは戻さない
+    this.setEnvironment(defaultEnvironment());
 
     this.p = new THREE.Vector3();
     this.vel = new THREE.Vector3();
@@ -79,6 +85,17 @@ export class Game {
     this.pitch = Math.min(1.35, Math.max(-0.2, this.pitch + dy * 0.006));
   }
 
+  /** manifest.rules(生の値でもよい。範囲外は丸められる) */
+  setRules(raw) { this.rules = resolveRules(raw); }
+
+  /** world.json の environment を resolveEnvironment した値 */
+  setEnvironment(env) {
+    this.scene.background = new THREE.Color(env.skyColor);
+    this.hemi.intensity = env.ambient;
+    this.sunLight.intensity = env.sun;
+    this.scene.fog = env.fogFar > 0 ? new THREE.Fog(new THREE.Color(env.fogColor), env.fogNear, env.fogFar) : null;
+  }
+
   setLogic(logic, handlers = {}) {
     this.logic = logic || null;
     this.logicHandlers = handlers;
@@ -97,6 +114,7 @@ export class Game {
 
   setWorld(world) {
     this.world = world; this.collision = world.collision;
+    if (world.environment) this.setEnvironment(world.environment);
     this.spawn = world.spawn.slice(); this.initialSpawn = world.spawn.slice();
     this.scene.add(world.group);
     const b = world.collision.bounds();
@@ -169,6 +187,12 @@ export class Game {
   update(dt) {
     dt = Math.min(dt, 0.05);
     if (this.completed) return;
+    this.time += dt;
+    // 動くパーツを先に進め、乗っているプレイヤーも一緒に運ぶ(衝突解決の前)
+    if (this.world?.dynamics?.size) {
+      const dyaw = this.world.dynamics.step(this.time, this.floor, this.p);
+      if (dyaw) this.heading += dyaw;
+    }
     const k = this.keys;
     let mx = this.joy.x + (k.has('r') ? 1 : 0) - (k.has('l') ? 1 : 0);
     let my = this.joy.y + (k.has('f') ? 1 : 0) - (k.has('b') ? 1 : 0);
@@ -176,22 +200,33 @@ export class Game {
     if (len < 0.15) { mx = 0; my = 0; } else if (len > 1) { mx /= len; my /= len; }
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     const wx = -sy * my + cy * mx, wz = -cy * my - sy * mx;
-    this.vel.x = wx * WALK; this.vel.z = wz * WALK;
-    if (this.grounded && this.jumpHeld) { this.vel.y = JUMP; this.grounded = false; }
-    this.vel.y -= GRAVITY * dt;
+    const { walkSpeed, jumpPower, gravity } = this.rules;
+    this.vel.x = wx * walkSpeed; this.vel.z = wz * walkSpeed;
+    const floor = this.grounded ? this.floor : null;
+    if (floor?.effect?.type === 'conveyor') { // 足場の向き(X方向)へ運ぶ。回る床でも今の向きに追従する
+      const R = floor.rot, h = Math.hypot(R[0], R[6]) || 1;
+      this.vel.x += (R[0] / h) * floor.effect.speed; this.vel.z += (R[6] / h) * floor.effect.speed;
+    }
+    if (this.grounded && this.jumpHeld) { this.vel.y = jumpPower; this.grounded = false; }
+    this.vel.y -= gravity * dt;
 
     const dist = Math.max(Math.abs(this.vel.x), Math.abs(this.vel.y), Math.abs(this.vel.z)) * dt;
     const steps = Math.max(1, Math.ceil(dist / 0.4));
-    let grounded = false;
+    let grounded = false, floorNow = null;
     for (let i = 0; i < steps; i++) {
       this.p.addScaledVector(this.vel, dt / steps);
       if (this.collision) {
         const r = this._resolve();
-        if (r.up) { grounded = true; if (this.vel.y < 0) this.vel.y = 0; }
+        if (r.up) {
+          const landed = this.collision.groundItem;
+          if (landed?.effect?.type === 'bounce' && this.vel.y <= 0) { this.vel.y = landed.effect.power; continue; } // 跳ねる(接地扱いにしない)
+          grounded = true; floorNow = landed; if (this.vel.y < 0) this.vel.y = 0;
+        }
         if (r.ceil && this.vel.y > 0) this.vel.y = 0;
       }
     }
     this.grounded = grounded;
+    this.floor = grounded ? floorNow : null; // 今乗っている衝突体(動く床・コンベア用)
     this._checkTriggers();
     this.logicRuntime?.update?.({ position: this.p, dt });
     if (this.holder) {

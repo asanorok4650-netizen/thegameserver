@@ -15,6 +15,7 @@ RBXL Player は React + Vite + Three.js で動作するブラウザベースの�
 - ゲーム実行・描画・移動: `src/game/`
 - ワールドパッケージ (.tgw): `src/tgw/`
 - 組み込みゲームロジック: `src/logics/`
+- 物理ルール・環境・パーツの振る舞い: `src/game/rules.js`、`src/behaviors/`、`src/game/dynamics.js`
 - 公開ワールドの一覧/API: `src/servers/`、`worker/`
 
 現状のゲームプレイはブラウザ内の単一プレイヤー実行です。`manifest.players.max` や `sendHz` はパッケージのメタデータであり、このブランチにリアルタイムマルチプレイヤー同期機能が実装されていることを意味しません。
@@ -161,6 +162,43 @@ Three.js に依存しない衝突処理です。ワールド構築時に `Collis
 
 .tgw に実行可能コードは格納しません。パッケージにはロジックIDと設定値だけを保存し、実際のコードはプレイヤー側の組み込みRuntimeが提供します。
 
+## 6.5 物理ルール・環境・パーツの振る舞い
+
+ゲームロジック(§6)とは別に、**数値だけ**でワールドの手触りを変える仕組みです。どれも .tgw にコードは入れず、検証済みの値としてエンジンが解釈します。
+
+### 物理ルール(`manifest.rules`)
+
+| キー | 既定 | 範囲 | 意味 |
+|---|---|---|---|
+| `walkSpeed` | 16 | 0〜100 | 歩く速さ (studs/秒) |
+| `jumpPower` | 50 | 0〜200 | ジャンプの初速 (studs/秒) |
+| `gravity` | 196.2 | 0〜600 | 重力 (studs/秒²) |
+
+書かれていない項目は既定値、範囲外は範囲に丸め、型が違えば既定値です(`resolveRules`)。Studio は既定値と違う項目だけを書き出します。
+
+### 環境(`world.json` の `environment`)
+
+`skyColor`、`ambient`、`sun`、`fogColor`、`fogNear`、`fogFar`(0 で霧なし)。`resolveEnvironment` が検証し、`buildSceneFromWorld` が `world.environment` として返し、`Game.setEnvironment` が適用します。
+
+### パーツの振る舞い(`attrs.behavior`)
+
+パーツの `attrs` に `behavior` とそのパラメータを書きます(例: `{ "behavior": "mover", "dy": 10, "period": 4 }`)。1パーツにつき1つです。
+
+| behavior | パラメータ | 動作 |
+|---|---|---|
+| `spinner` | `axis`(x/y/z)、`speed`(度/秒) | 回り続ける。Y軸なら上のプレイヤーも一緒に回る |
+| `mover` | `dx` `dy` `dz`、`period`(秒) | 現在位置から (dx,dy,dz) までなめらかに往復。上のプレイヤーも運ぶ |
+| `bounce` | `power`(studs/秒) | 乗ると真上に跳ね上げる |
+| `conveyor` | `speed`(studs/秒、負で逆向き) | 乗るとパーツのX方向へ運ぶ |
+
+- 定義は `src/behaviors/index.js`(`BEHAVIORS`)。Studio のフォームも同じ定義から作ります。
+- 動く振る舞い(spinner / mover)の姿勢は **時刻 t の関数**(`poseAt`)です。同じ t なら全員が同じ位置になるので、マルチプレイ化のときも状態の同期は不要で、時刻だけ揃えれば足ります。
+- 衝突体は `CollisionWorld.moveItem()` で位置・向きを更新します。旧 `pushOut()` 用の空間グリッドには再登録しません(エンジンが使う `pushOutCapsule()` は全件走査なので影響しません)。
+- 足場の判定は `CollisionWorld.groundItem`(直近の `pushOutCapsule` で上向きの法線を返した衝突体)です。`Game.floor` に保持し、動く床の運搬とコンベア・バウンスに使います。
+- `bounce` / `conveyor` は衝突体に `effect` を持たせます。「当たり判定あり」のパーツでないと乗れないため効果が出ません(Studio が警告を出します)。
+- 新しい振る舞いを足すには: `BEHAVIORS` に定義 → 動くものは `poseAt` に姿勢の計算 → 効果ものは `world.js` で `item.effect` を設定し `engine.js` で処理 → `test/rules.test.mjs` にテスト。
+
+
 ## 7. Studio
 
 Studio の主要な責務:
@@ -206,11 +244,13 @@ Worker の環境設定は `worker/wrangler.toml` を参照してください。�
 - `test/logics.test.mjs`: ロジック定義・解決
 - `test/tgw.test.mjs`: .tgw の検証・読み書き
 - `test/studio.test.mjs`: Studio モデル・履歴など
+- `test/rules.test.mjs`: 物理ルール・環境・振る舞い・動くパーツ・足場検出
 - `test/mesh.test.mjs`、`test/rbxm.test.mjs`、`test/rigs.test.mjs`: アバター/RBXM関連
 
 変更領域ごとの確認:
 
 - ゲーム移動・衝突: 平地、床端、壁、角、天井、球、くさび、ジャンプ、落下復帰
+- 物理・振る舞い: rules を変えた歩行/ジャンプ/重力、動く床に乗って運ばれる・降りる、回転床、バウンス、コンベア(実機の Safari/iPad も)
 - ロジック: kill / checkpoint / goal / killY / restart
 - .tgw: 正常ファイル、形式違い、壊れたZIP、パーツ数不一致、サイズ上限
 - Studio: 新規作成、編集、Undo/Redo、下書き復元、書き出し、再読み込み、公開

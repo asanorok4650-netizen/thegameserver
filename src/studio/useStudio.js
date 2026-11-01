@@ -1,7 +1,8 @@
 // Studioの状態(ドキュメント・履歴・選択・ローカル自動保存)。通信は publish() の中だけ。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  addPart, removeParts, duplicateParts, updateParts, movePartsBy, setMeta, createStarterDoc, checkDoc, addSpawn, removeSpawn
+  addPart, removeParts, duplicateParts, updateParts, movePartsBy, setMeta, createStarterDoc, checkDoc, addSpawn, removeSpawn,
+  setRules, setEnvironment, setPartBehavior, setPartBehaviorParam
 } from './model.js';
 import { createHistory, commit, undo, redo, canUndo, canRedo, markSaved, isDirty, reset } from './history.js';
 import { loadDraft, saveDraft, clearDraft } from './storage.js';
@@ -90,6 +91,10 @@ export function useStudio() {
     patch: (ids, p, key) => apply((d) => updateParts(d, ids, p), key),
     nudge: (ids, delta) => apply((d) => movePartsBy(d, ids, delta), 'nudge'),
     meta: (p, key) => apply((d) => setMeta(d, p), key || 'meta'),
+    rules: (patch, key) => apply((d) => setRules(d, patch), key || 'rules'),
+    environment: (patch, key) => apply((d) => setEnvironment(d, patch), key || 'env'),
+    behavior: (ids, id) => apply((d) => setPartBehavior(d, ids, id)),
+    behaviorParam: (id, key, value) => apply((d) => setPartBehaviorParam(d, id, key, value), 'bparam-' + id + '-' + key),
     addSpawn: (pos) => apply((d) => addSpawn(d, { pos })),
     removeSpawn: (index) => apply((d) => removeSpawn(d, index)),
     newDoc: () => { setH((p) => reset(p, createStarterDoc())); setSelection([]); clearDraft(); say('新しいワールドを作りました', 'ok'); }
