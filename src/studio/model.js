@@ -20,6 +20,7 @@ export function createDoc(opts = {}) {
     players: { max: 8, sendHz: 10, ...(opts.players || {}) },
     logic: opts.logic || null,
     eventRules: normalizeEventRules(opts.eventRules),
+    scripting: opts.scripting && typeof opts.scripting === 'object' ? opts.scripting : { version: 1, workspace: null },
     rules: resolveRules(opts.rules),
     environment: resolveEnvironment(opts.environment),
     spawns: opts.spawns || [],
@@ -41,6 +42,7 @@ export function normalizeDoc(raw) {
     players: d.players,
     logic: d.logic || null,
     eventRules: d.eventRules,
+    scripting: d.scripting,
     rules: d.rules,
     environment: d.environment,
     spawns: Array.isArray(d.spawns) ? d.spawns.map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })) : [],
@@ -67,6 +69,7 @@ export function docFromPackage(pkg, fallbackName = 'Imported World') {
     players: m.players,
     logic: m.logic || null,
     eventRules: m.eventRules,
+    scripting: m.scripting,
     rules: m.rules,
     environment: w.environment,
     spawns: (w.spawns || []).map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })),
@@ -85,7 +88,7 @@ export function docToPackage(doc, extra = {}) {
   if (env) worldJson.environment = env;
   const manifest = createManifest(worldJson, null, {
     name: doc.name, description: doc.description, author: extra.author || '',
-    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, eventRules: doc.eventRules?.length ? doc.eventRules : undefined, rules: diffFromDefault(resolveRules(doc.rules), RULE_FIELDS) || undefined
+    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, eventRules: doc.eventRules?.length ? doc.eventRules : undefined, scripting: doc.scripting, rules: diffFromDefault(resolveRules(doc.rules), RULE_FIELDS) || undefined
   });
   if (doc.source) manifest.source = doc.source;
   return { worldJson, manifest };
