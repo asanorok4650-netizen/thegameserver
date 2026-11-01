@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import {
   createDoc, createStarterDoc, addPart, updateParts, movePartsBy, removeParts, duplicateParts,
-  addSpawn, removeSpawn, setMeta, checkDoc, docToPackage, docFromPackage, yawOf, rotY, IDENT
+  addSpawn, removeSpawn, setMeta, checkDoc, docToPackage, docFromPackage, yawOf, rotY, IDENT, eulerToRot, rotToEuler
 } from '../src/studio/model.js';
 import { createHistory, commit, undo, redo, canUndo, canRedo, markSaved, isDirty } from '../src/studio/history.js';
 import { rayVsPart, pickPart, rayVsPlaneY, snap } from '../src/studio/pick.js';
@@ -89,6 +89,27 @@ assert.equal(yawOf(IDENT), 0);
 assert.equal(yawOf(rotY(90)), 90);
 assert.equal(yawOf(rotY(-45)), -45);
 assert.equal(yawOf([1, 0, 0, 0, 0, -1, 0, 1, 0]), null, '複合回転はnull');
+
+// 3軸の回転: Y単独は rotY と一致 / 往復で元の角度に戻る / 行列は直交
+const close = (a, b, e = 1e-9) => a.every((v, i) => Math.abs(v - b[i]) < e);
+assert.ok(close(eulerToRot(0, 33, 0), rotY(33)));
+assert.ok(close(eulerToRot(0, 0, 0), IDENT));
+for (const e of [[10, 20, 30], [-45, 120, -80], [89, -170, 15], [0, 0, 90], [-30, 0, 0]]) {
+  const rt = rotToEuler(eulerToRot(...e));
+  assert.ok(close(rt, e, 0.011), `往復 ${e} → ${rt}`);
+}
+{ // 真上を向く(X=90°)でも、同じ向きの行列に戻る
+  const m = eulerToRot(90, 25, 40), back = eulerToRot(...rotToEuler(m));
+  assert.ok(close(m, back, 1e-3), 'ジンバル付近でも同じ向き');
+}
+{ // R * Rᵀ = I(回転行列として正しい)
+  const m = eulerToRot(15, 50, -70);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    const dot = m[i * 3] * m[j * 3] + m[i * 3 + 1] * m[j * 3 + 1] + m[i * 3 + 2] * m[j * 3 + 2];
+    assert.ok(Math.abs(dot - (i === j ? 1 : 0)) < 1e-9);
+  }
+}
+assert.equal(yawOf(eulerToRot(0, 60, 0)), 60);
 
 // ---- 履歴 ----
 let h = createHistory(createStarterDoc('H'), { coalesceMs: 1000 });

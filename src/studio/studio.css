@@ -52,3 +52,10 @@
   .st-title{max-width:30vw}
   .studio-hint{display:none}
 }
+
+/* 位置・サイズ・回転のスライダー */
+.st-group{display:grid;gap:6px;padding:10px;background:#f7f8fb;border:1px solid #eeeef1;border-radius:10px}
+.st-slide{display:grid;grid-template-columns:16px 1fr 72px;align-items:center;gap:8px}
+.st-axis{font:800 11px inherit;color:#7787ca;text-align:center}
+.st-range{width:100%;min-width:0;height:28px;margin:0;accent-color:#335cff;touch-action:pan-y}
+@media(pointer:coarse){.st-range{height:36px}}

@@ -200,3 +200,26 @@ export function rotY(deg) {
   const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
   return [c, 0, s, 0, 1, 0, -s, 0, c];
 }
+
+// ---- 3軸の回転(度)。Robloxの Orientation と同じ順序 R = Ry * Rx * Rz ----
+export function eulerToRot(xDeg, yDeg, zDeg) {
+  const d = Math.PI / 180;
+  const cx = Math.cos(xDeg * d), sx = Math.sin(xDeg * d);
+  const cy = Math.cos(yDeg * d), sy = Math.sin(yDeg * d);
+  const cz = Math.cos(zDeg * d), sz = Math.sin(zDeg * d);
+  return [
+    cy * cz + sy * sx * sz, -cy * sz + sy * sx * cz, sy * cx,
+    cx * sz, cx * cz, -sx,
+    -sy * cz + cy * sx * sz, sy * sz + cy * sx * cz, cy * cx
+  ];
+}
+/** 回転行列 → [x,y,z](度)。X=±90°(真上/真下を向く)では Z を 0 にまとめる */
+export function rotToEuler(m) {
+  const r2 = (v) => Math.round(v * 100) / 100 + 0;
+  const x = Math.asin(Math.max(-1, Math.min(1, -m[5])));
+  let y, z;
+  if (Math.abs(m[5]) < 0.999999) { y = Math.atan2(m[2], m[8]); z = Math.atan2(m[3], m[4]); }
+  else { y = Math.atan2(-m[6], m[0]); z = 0; }
+  const k = 180 / Math.PI;
+  return [r2(x * k), r2(y * k), r2(z * k)];
+}

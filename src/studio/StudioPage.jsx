@@ -1,42 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStudio } from './useStudio.js';
 import { StudioViewport } from './viewport.js';
-import { checkDoc, yawOf, rotY, IDENT } from './model.js';
+import { checkDoc } from './model.js';
+import TransformFields from './Transform.jsx';
 import { SHAPES } from '../tgw/validate.js';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
 const fmt = (v) => (Math.round(v * 1000) / 1000).toString();
 
-/** 数値3つの入力(確定は Enter/フォーカスを外した時。入力途中の値でドキュメントを壊さない) */
-function Vec3({ label, value, onCommit, step = 0.5, min }) {
-  const [text, setText] = useState(value.map(fmt));
-  useEffect(() => { setText(value.map(fmt)); }, [value[0], value[1], value[2]]); // eslint-disable-line react-hooks/exhaustive-deps
-  const commitAt = (i) => {
-    const n = Number(text[i]);
-    if (!Number.isFinite(n) || (min !== undefined && n < min) || n === value[i]) { setText(value.map(fmt)); return; }
-    const next = value.slice(); next[i] = n; onCommit(next);
-  };
-  return (
-    <div className="st-field">
-      <span className="st-label">{label}</span>
-      <div className="st-vec">
-        {['X', 'Y', 'Z'].map((a, i) => (
-          <input key={a} className="text-input st-num" type="number" inputMode="decimal" step={step} aria-label={`${label} ${a}`}
-            value={text[i]} onChange={(e) => setText((t) => t.map((x, j) => (j === i ? e.target.value : x)))}
-            onBlur={() => commitAt(i)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Inspector({ parts, onPatch, onRemove, onDuplicate }) {
+function Inspector({ parts, grid, onPatch, onRemove, onDuplicate }) {
   if (!parts.length) return <p className="st-empty">パーツを選ぶと、ここで編集できます。<br />(ビューでタップ / 「パーツ」タブから選択)</p>;
   const ids = parts.map((p) => p.id);
   const one = parts.length === 1 ? parts[0] : null;
   const first = parts[0];
-  const yaw = one ? yawOf(one.rot) : null;
   return (
     <div className="st-inspector">
       <div className="st-row">
@@ -49,14 +26,7 @@ function Inspector({ parts, onPatch, onRemove, onDuplicate }) {
         <>
           <label className="st-field"><span className="st-label">名前</span>
             <input className="text-input" value={one.name} maxLength={100} onChange={(e) => onPatch(ids, { name: e.target.value }, 'name-' + one.id)} /></label>
-          <Vec3 label="位置" value={one.pos} onCommit={(v) => onPatch(ids, { pos: v })} />
-          <Vec3 label="サイズ" value={one.size} min={0.05} onCommit={(v) => onPatch(ids, { size: v })} />
-          <label className="st-field"><span className="st-label">回転 Y(度)</span>
-            {yaw === null
-              ? <span className="st-row"><span className="st-note">複合回転(読み込み元のまま)</span>
-                <button className="secondary-button" type="button" onClick={() => onPatch(ids, { rot: IDENT.slice() })}>リセット</button></span>
-              : <input className="text-input st-num" type="number" step="15" value={yaw} onChange={(e) => { const n = Number(e.target.value); if (Number.isFinite(n)) onPatch(ids, { rot: rotY(n) }, 'rot-' + one.id); }} />}
-          </label>
+          <TransformFields key={one.id} part={one} grid={grid} onPatch={onPatch} />
         </>
       )}
       <label className="st-field"><span className="st-label">形</span>
@@ -189,7 +159,7 @@ export default function StudioPage({ onExit }) {
             ))}
           </div>
           <div className="st-panel">
-            {tab === 'select' && <Inspector parts={selected} onPatch={actions.patch} onRemove={actions.remove} onDuplicate={actions.duplicate} />}
+            {tab === 'select' && <Inspector parts={selected} grid={grid} onPatch={actions.patch} onRemove={actions.remove} onDuplicate={actions.duplicate} />}
             {tab === 'parts' && (
               <div>
                 <input className="text-input" placeholder="名前で絞り込み" value={filter} onChange={(e) => setFilter(e.target.value)} />
