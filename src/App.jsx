@@ -8,6 +8,7 @@ import PlaceholderSection from './components/PlaceholderSection.jsx';
 import AvatarSection from './components/AvatarSection.jsx';
 import SettingsSection from './components/SettingsSection.jsx';
 import GameView from './components/GameView.jsx';
+import StudioPage from './studio/StudioPage.jsx';
 import { useAvatar } from './hooks/useAvatar.js';
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
+      {page === 'studio' && <StudioPage onExit={() => navigate('home')} />}
       {playing && <GameView server={playing} desc={avatar.desc} onExit={() => setPlaying(null)} />}
       <Sidebar page={page} open={sidebarOpen} onNavigate={navigate} user={avatar.user} />
       <main className="main-area">

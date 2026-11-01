@@ -20,6 +20,11 @@ export const PAGES = {
     subtitle: 'パーツを組み合わせてアバターを作ろう。',
     sections: ['avatar']
   },
+  studio: {
+    title: 'Studio',
+    subtitle: 'ワールドを作って公開しよう。',
+    sections: []
+  },
   settings: {
     title: '設定',
     subtitle: '接続と描画の設定。',
@@ -32,5 +37,6 @@ export const NAV_ITEMS = [
   { page: 'discover', icon: 'compass', label: '探索' },
   { page: 'friends', icon: 'users', label: 'フレンド' },
   { page: 'avatar', icon: 'user', label: 'アバター' },
+  { page: 'studio', icon: 'box', label: 'Studio' },
   { page: 'settings', icon: 'settings', label: '設定' }
 ];
