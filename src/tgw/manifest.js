@@ -22,6 +22,7 @@ export function createManifest(worldJson, report, opts = {}) {
   if (opts.rules && Object.keys(opts.rules).length) manifest.rules = { ...opts.rules }; // 既定値と違う項目だけ(game/rules.js の diffFromDefault)
   if (opts.logic) manifest.logic = { version: 1, params: {}, ...opts.logic };
   if (Array.isArray(opts.eventRules) && opts.eventRules.length) manifest.eventRules = opts.eventRules;
+  if (opts.scripting && typeof opts.scripting === 'object') manifest.scripting = opts.scripting;
   if (report) {
     manifest.source = { kind: 'rbxl', name: opts.sourceName || '', ignored: report.ignored || {}, approx: report.approx || {} };
   }
