@@ -27,7 +27,7 @@ function ExpressionBlock({ node, onChange, variables, depth = 0 }) {
       {node.kind === 'variable' && <select value={node.name} onChange={(e) => patch({ name: e.target.value })}>{variables.map((v) => <option key={v} value={v}>{v}</option>)}</select>}
       {node.kind === 'math' && <select value={node.op} onChange={(e) => patch({ op: e.target.value })}><option value="add">＋</option><option value="sub">−</option><option value="mul">×</option><option value="div">÷</option><option value="mod">余り</option></select>}
       {node.kind === 'compare' && <select value={node.op} onChange={(e) => patch({ op: e.target.value })}><option value="gte">≧</option><option value="lte">≦</option><option value="gt">＞</option><option value="lt">＜</option><option value="eq">＝</option><option value="neq">≠</option></select>}
-      {node.kind === 'logic' && <select value={node.op} onChange={(e) => patch({ op: e.target.value })}><option value="and">AND</option><option value="or">OR</option><option value="not">NOT</option></select>}
+      {node.kind === 'logic' && <select value={node.op} onChange={(e) => patch({ op: e.target.value, items: e.target.value === 'not' ? (node.items || []).slice(0, 1) : node.items })}><option value="and">AND</option><option value="or">OR</option><option value="not">NOT</option></select>}
     </div>
     {['math','compare'].includes(node.kind) && <div className="st-expr-children">{child('left', node.left)}{child('right', node.right)}</div>}
     {node.kind === 'logic' && <div className="st-expr-children">
