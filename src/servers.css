@@ -1,6 +1,0 @@
-.game-desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.panel-divider{border:0;border-top:1px solid #eeeef1;margin:20px 0}
-.server-admin-list{list-style:none;margin:16px 0 0;padding:0;display:grid;gap:8px}
-.server-admin-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}
-.server-admin-list li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.server-admin-list .secondary-button{margin-top:0;flex:0 0 auto}

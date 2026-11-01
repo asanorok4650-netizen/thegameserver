@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { createLogicRuntime, resolveLogicConfig } from '../src/logics/index.js';
-import { sphereIntersectsOBB } from '../src/game/collision.js';
+import { sphereIntersectsOBB, CollisionWorld } from '../src/game/collision.js';
+
+// カプセルは床から押し戻され、壁には側面から押し戻される。
+const floorCollision = new CollisionWorld();
+floorCollision.add({ type: 'box', pos: [0,0,0], rot: [1,0,0,0,1,0,0,0,1], half: [10,0.5,10] });
+const standing = [0,0,0];
+assert.equal(floorCollision.pushOutCapsule(standing, 0.9, 0.9, 4.4), true);
+assert.ok(standing[1] > 0.49, '床から上方向へ押し戻される');
+const wallCollision = new CollisionWorld();
+wallCollision.add({ type: 'box', pos: [1,2,0], rot: [1,0,0,0,1,0,0,0,1], half: [0.5,3,3] });
+const besideWall = [0,0,0];
+assert.equal(wallCollision.pushOutCapsule(besideWall, 0.9, 0.9, 4.4), true);
+assert.ok(besideWall[0] < -0.39, '壁から横方向へ押し戻される');
 
 // 大きな床の上で足元の球が接するケースもトリガーとして拾う。
 const floor = { pos: [0, 0, 0], rot: [1,0,0,0,1,0,0,0,1], half: [60,0.5,40] };
