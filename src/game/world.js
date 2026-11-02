@@ -42,7 +42,7 @@ export function buildSceneFromWorld(worldJson) {
     const shape = p.shape;
     const t = Math.min(1, Math.max(0, Number(p.transparency) || 0));
 
-    if (t < 0.99) {
+    if (t < 0.999) {
       const key = shape + '|' + Math.round(t * 10);
       let b = buckets.get(key);
       if (!b) buckets.set(key, (b = { key, shape, t: Math.round(t * 10) / 10, list: [] }));
@@ -64,16 +64,15 @@ export function buildSceneFromWorld(worldJson) {
     }
     let item = null;
 
-    if (p.collide) {
+    {
       const base = { pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2] };
-      if (shape === 'ball') item = { ...base, type: 'ball', radius: sx / 2 };
+      if (shape === 'ball') item = { ...base, type: 'ball', radius: Math.max(sx, sy, sz) / 2 };
       else if (shape === 'wedge') item = { ...base, type: 'convex', planes: wedgePlanes([sx, sy, sz]) };
       else if (shape === 'corner') item = { ...base, type: 'convex', planes: cornerPlanes([sx, sy, sz]) };
       else item = { ...base, type: 'box' };
       if (behavior && behavior.id === 'bounce') { item.effect = { type: 'bounce', power: behavior.params.power }; stats.effects++; }
       if (behavior && behavior.id === 'conveyor') { item.effect = { type: 'conveyor', speed: behavior.params.speed }; stats.effects++; }
-      collision.add(item);
-      stats.collidable++;
+      if (p.collide) { collision.add(item); stats.collidable++; }
     }
     let entry = null;
     if (isMotion(behavior)) {
@@ -81,7 +80,7 @@ export function buildSceneFromWorld(worldJson) {
       pending.push(entry);
       stats.dynamic++;
     }
-    partRecords.set(p.id, { id: p.id, name: p.name, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: true, item, trigger: ruleTrigger, entry });
+    partRecords.set(p.id, { id: p.id, name: p.name, shape, color: p.color, transparency: t, collide: !!p.collide, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: true, item, trigger: ruleTrigger, entry, dynamicMesh: null });
   }
 
   const group = new THREE.Group();
@@ -99,15 +98,37 @@ export function buildSceneFromWorld(worldJson) {
     stats.drawn += b.list.length;
   }
   const tmp = new THREE.Matrix4(), scl = new THREE.Matrix4();
-  const applyPartMatrix = (record) => {
-    const slot = slots.get(record.id);
-    if (!slot) return;
-    const mesh = meshes.get(slot.key);
+  const matrixFor = (record) => {
     const q = record.pos, r = record.rot;
     tmp.set(r[0], r[1], r[2], q[0], r[3], r[4], r[5], q[1], r[6], r[7], r[8], q[2], 0, 0, 0, 1);
     tmp.multiply(scl.makeScale(record.visible ? record.size[0] : 0, record.visible ? record.size[1] : 0, record.visible ? record.size[2] : 0));
-    mesh.setMatrixAt(slot.i, tmp);
-    mesh.instanceMatrix.needsUpdate = true;
+    return tmp;
+  };
+  const applyPartMatrix = (record) => {
+    const slot = slots.get(record.id);
+    if (slot) {
+      const mesh = meshes.get(slot.key);
+      mesh.setMatrixAt(slot.i, matrixFor(record));
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    if (record.dynamicMesh) record.dynamicMesh.matrix.copy(matrixFor(record));
+  };
+  const ensureDynamicMesh = (record) => {
+    if (record.dynamicMesh) return record.dynamicMesh;
+    const slot = slots.get(record.id);
+    if (slot) {
+      const mesh = meshes.get(slot.key);
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      mesh.setMatrixAt(slot.i, zero);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    const material = new THREE.MeshLambertMaterial({ color: record.color, transparent: record.transparency > 0, opacity: 1 - record.transparency, depthWrite: record.transparency === 0 });
+    const mesh = new THREE.Mesh(unitGeometry(record.shape), material);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(matrixFor(record));
+    group.add(mesh);
+    record.dynamicMesh = mesh;
+    return mesh;
   };
   for (const e of pending) {
     const record = partRecords.get(e.id);
@@ -117,7 +138,12 @@ export function buildSceneFromWorld(worldJson) {
       applyPartMatrix(record);
     };
   }
-  const findRecord = (key) => [...partRecords.values()].find((p) => p.id === key || p.name === key);
+  const findRecord = (key) => {
+    const exact = partRecords.get(key);
+    if (exact) return exact;
+    const matches = [...partRecords.values()].filter((p) => p.name === key);
+    return matches.length === 1 ? matches[0] : null;
+  };
   const setPartVisible = (key, visible) => {
     const record = findRecord(key);
     if (!record) return false;
@@ -144,6 +170,89 @@ export function buildSceneFromWorld(worldJson) {
     return true;
   };
 
+  const setPartProperty = (key, property, value) => {
+    const record = findRecord(key);
+    if (!record) return false;
+    const finiteVector = Array.isArray(value) && value.length === 3 && value.every((v) => typeof v === 'number' && Number.isFinite(v));
+    if (property === 'color') {
+      if (typeof value !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(value)) return false;
+      record.color = value.toLowerCase();
+      const slot = slots.get(record.id);
+      if (slot) { const mesh = meshes.get(slot.key); mesh.setColorAt(slot.i, new THREE.Color(record.color)); if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true; }
+      if (record.dynamicMesh) record.dynamicMesh.material.color.set(record.color);
+      return true;
+    }
+    if (property === 'size') {
+      if (!finiteVector || value.some((v) => v < 0.1 || v > 1000)) return false;
+      if (record.collide && record.item) collision.remove(record.item);
+      record.size = value.slice();
+      record.trigger.size = value.slice(); record.trigger.half = value.map((v) => v / 2);
+      if (record.item) {
+        record.item.half = value.map((v) => v / 2);
+        if (record.item.type === 'ball') record.item.radius = Math.max(...value) / 2;
+        if (record.item.type === 'convex') record.item.planes = record.shape === 'wedge' ? wedgePlanes(value) : cornerPlanes(value);
+        if (record.collide) collision.add(record.item);
+      }
+      if (record.entry) record.entry.size = value.slice();
+      applyPartMatrix(record);
+      return true;
+    }
+    if (property === 'position') {
+      if (!finiteVector || value.some((v) => Math.abs(v) > 100000)) return false;
+      record.pos = value.slice(); record.trigger.pos = record.pos.slice();
+      if (record.entry) { record.entry.base.pos = record.pos.slice(); record.entry.pose.pos = record.pos.slice(); }
+      if (record.item && record.collide) collision.moveItem(record.item, record.pos, record.rot);
+      applyPartMatrix(record);
+      return true;
+    }
+    if (property === 'rotation') {
+      if (!finiteVector || value.some((v) => Math.abs(v) > 36000)) return false;
+      const euler = new THREE.Euler(value[0] * Math.PI / 180, value[1] * Math.PI / 180, value[2] * Math.PI / 180, 'XYZ');
+      const matrix = new THREE.Matrix4().makeRotationFromEuler(euler).elements;
+      record.rot = [matrix[0], matrix[4], matrix[8], matrix[1], matrix[5], matrix[9], matrix[2], matrix[6], matrix[10]];
+      record.trigger.rot = record.rot.slice();
+      if (record.entry) { record.entry.base.rot = record.rot.slice(); record.entry.pose.rot = record.rot.slice(); }
+      if (record.item && record.collide) collision.moveItem(record.item, record.pos, record.rot);
+      applyPartMatrix(record);
+      return true;
+    }
+    if (property === 'transparency') {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+      record.transparency = Math.max(0, Math.min(1, value));
+      const mesh = ensureDynamicMesh(record);
+      mesh.material.opacity = 1 - record.transparency;
+      mesh.material.transparent = record.transparency > 0;
+      mesh.material.depthWrite = record.transparency === 0;
+      mesh.material.needsUpdate = true;
+      return true;
+    }
+    if (property === 'collide') {
+      const next = !!value;
+      if (record.collide !== next && record.item) {
+        if (next) collision.add(record.item); else collision.remove(record.item);
+      }
+      record.collide = next;
+      return true;
+    }
+    return false;
+  };
+  const getPartProperty = (key, property) => {
+    const record = findRecord(key);
+    if (!record) return null;
+    if (property === 'color') return record.color;
+    if (property === 'collide') return record.collide;
+    if (property === 'transparency') return record.transparency;
+    const axis = { X: 0, Y: 1, Z: 2 };
+    if (property.startsWith('size')) return record.size[axis[property.slice(-1).toUpperCase()]];
+    if (property.startsWith('position')) return record.pos[axis[property.slice(-1).toUpperCase()]];
+    if (property.startsWith('rotation')) {
+      const m = new THREE.Matrix4().set(record.rot[0], record.rot[1], record.rot[2], 0, record.rot[3], record.rot[4], record.rot[5], 0, record.rot[6], record.rot[7], record.rot[8], 0, 0, 0, 0, 1);
+      const e = new THREE.Euler().setFromRotationMatrix(m, 'XYZ');
+      return ({ rotationX: e.x, rotationY: e.y, rotationZ: e.z })[property] * 180 / Math.PI;
+    }
+    return null;
+  };
+
   let spawn;
   const spawns = worldJson.spawns || [];
   if (spawns.length) {
@@ -154,7 +263,7 @@ export function buildSceneFromWorld(worldJson) {
     const top = collision.highestTopAt(0, 0), b = collision.bounds();
     spawn = top !== null ? [0, top + 0.2, 0] : b ? [(b.min[0] + b.max[0]) / 2, b.max[1] + 10, (b.min[2] + b.max[2]) / 2] : [0, 10, 0];
   }
-  return { group, collision, triggers, ruleTriggers, ruleParts: ruleTriggers, dynamics, setPartVisible, movePart, environment: resolveEnvironment(worldJson.environment), spawn, stats };
+  return { group, collision, triggers, ruleTriggers, ruleParts: ruleTriggers, dynamics, setPartVisible, movePart, setPartProperty, getPartProperty, environment: resolveEnvironment(worldJson.environment), spawn, stats };
 }
 
 export function buildWorld(tree, log = () => {}) {
