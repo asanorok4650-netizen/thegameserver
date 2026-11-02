@@ -6,7 +6,7 @@ const MAX_WORK_PER_TICK = 4000; // 1フレームで進められる「ブロッ�
 const MAX_REPEAT = 100;
 
 export function createBlocklyRuntime(program, api = {}) {
-  const variables = new Map([['score', 0]]);
+  const variables = new Map([['score', 0], ...((program?.variables || []).map((v) => [v.name, clamp(Number(v.initial) || 0)]))]);
   const tasks = [];
   const intervals = new Map();
   let score = 0, elapsed = 0, stopped = false;
@@ -62,6 +62,10 @@ export function createBlocklyRuntime(program, api = {}) {
         case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
+        case 'teleportToPart': api.teleportToPart?.(step.part); yield 0; break;
+        case 'checkpointAtPart': api.checkpointAtPart?.(step.part); yield 0; break;
+        case 'respawn': api.respawn?.(); yield 0; break;
+        case 'complete': stopped = true; api.complete?.(); return;
         default: yield 0;
       }
     }
@@ -77,6 +81,7 @@ export function createBlocklyRuntime(program, api = {}) {
     start() { launch('start'); },
     onSpawn() { launch('spawn'); },
     onTouch(part) { launch('touch', part?.id, part?.name); },
+    onLeave(part) { launch('leave', part?.id, part?.name); },
     update(dt) {
       if (stopped) return;
       elapsed += Math.max(0, Math.min(0.1, dt || 0));
@@ -97,7 +102,7 @@ export function createBlocklyRuntime(program, api = {}) {
       }
       if (tasks.length > MAX_TASKS) tasks.length = MAX_TASKS;
     },
-    reset() { tasks.length = 0; intervals.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
+    reset() { tasks.length = 0; intervals.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, clamp(Number(v.initial) || 0)); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
     getScore: () => score,
     getVariables: () => Object.fromEntries(variables),
     stop() { stopped = true; tasks.length = 0; }
