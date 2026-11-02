@@ -337,3 +337,31 @@ test('M1-B elapsed-time expression returns bounded runtime elapsed seconds', () 
   runtime.update(0.1);
   assert.equal(runtime.getVariables().elapsed, 0.1);
 });
+
+
+test('M1-B compiler recognizes random and elapsed-time Blockly value blocks', () => {
+  const random = statement('rbxl_random', {}, {
+    MIN: { block: value('math_number', { NUM: 2 }) },
+    MAX: { block: value('math_number', { NUM: 8 }) }
+  });
+  const setRandom = statement('rbxl_set_variable', { NAME: 'roll' }, { VALUE: { block: random } });
+  setRandom.next = { block: statement('rbxl_set_variable', { NAME: 'elapsed' }, { VALUE: { block: value('rbxl_elapsed_time') } }) };
+  const result = compileBlocklyWorkspace(start(setRandom));
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.events[0].body[0].value.op, 'random');
+  assert.equal(result.events[0].body[1].value.op, 'elapsed');
+});
+
+test('M1-B bounds list size and string length', () => {
+  const warnings = [];
+  const program = { version: 1, variables: [{ name: 'items', initial: [] }, { name: 'longText', initial: '' }], events: [{ event: 'start', body: [
+    ...Array.from({ length: 105 }, (_, index) => ({ op: 'listAdd', name: 'items', value: { op: 'number', value: index } })),
+    { op: 'setVariable', name: 'longText', value: { op: 'string', value: 'x'.repeat(700) } }
+  ] }] };
+  const runtime = createBlocklyRuntime(program, { onWarning: (message) => warnings.push(message) });
+  runtime.start();
+  for (let i = 0; i < 4; i++) runtime.update(0.016);
+  assert.equal(runtime.getVariables().items.length, 100);
+  assert.equal(runtime.getVariables().longText.length, 500);
+  assert.ok(warnings.some((message) => message.includes('最大要素数100件')));
+});
