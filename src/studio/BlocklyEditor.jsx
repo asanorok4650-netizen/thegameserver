@@ -31,9 +31,20 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_complete', message0: 'ゲームをクリアにする', previousStatement: null, nextStatement: null, colour: 145 },
 
     // Variables. Keep the Phase 1 text-name block for saved-workspace compatibility.
-    { type: 'rbxl_set_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_input', name: 'NAME', text: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
-    { type: 'rbxl_set_named_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_variable', name: 'VAR', variable: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
+    { type: 'rbxl_set_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_input', name: 'NAME', text: 'coins' }, { type: 'input_value', name: 'VALUE' }], previousStatement: null, nextStatement: null, colour: 330 },
+    { type: 'rbxl_set_named_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_variable', name: 'VAR', variable: 'coins' }, { type: 'input_value', name: 'VALUE' }], previousStatement: null, nextStatement: null, colour: 330 },
     { type: 'rbxl_change_variable', message0: '変数 %1 を %2 だけ増やす', args0: [{ type: 'field_variable', name: 'VAR', variable: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
+
+    // M1-B: strings, random values, elapsed time and lists.
+    { type: 'rbxl_text', message0: '%1', args0: [{ type: 'field_input', name: 'TEXT', text: 'テキスト' }], output: 'String', colour: 190 },
+    { type: 'rbxl_text_join', message0: '文字列 %1 と %2 をつなげる', args0: [{ type: 'input_value', name: 'A', check: 'String' }, { type: 'input_value', name: 'B', check: 'String' }], output: 'String', colour: 190 },
+    { type: 'rbxl_random', message0: '%1 から %2 までの乱数', args0: [{ type: 'input_value', name: 'MIN', check: 'Number' }, { type: 'input_value', name: 'MAX', check: 'Number' }], output: 'Number', colour: 210 },
+    { type: 'rbxl_elapsed_time', message0: 'ゲーム開始からの経過秒数', output: 'Number', colour: 210 },
+    { type: 'rbxl_list_create', message0: 'リストを作る %1 %2 %3', args0: [{ type: 'input_value', name: 'ADD0' }, { type: 'input_value', name: 'ADD1' }, { type: 'input_value', name: 'ADD2' }], output: 'Array', colour: 285 },
+    { type: 'rbxl_list_length', message0: 'リスト %1 の長さ', args0: [{ type: 'input_value', name: 'LIST', check: 'Array' }], output: 'Number', colour: 285 },
+    { type: 'rbxl_list_get', message0: 'リスト %1 の %2 番目', args0: [{ type: 'input_value', name: 'LIST', check: 'Array' }, { type: 'input_value', name: 'INDEX', check: 'Number' }], output: null, colour: 285 },
+    { type: 'rbxl_list_add', message0: 'リスト変数 %1 に %2 を追加', args0: [{ type: 'field_variable', name: 'VAR', variable: 'items' }, { type: 'input_value', name: 'VALUE' }], previousStatement: null, nextStatement: null, colour: 285 },
+    { type: 'rbxl_list_replace', message0: 'リスト変数 %1 の %2 番目を %3 に置き換える', args0: [{ type: 'field_variable', name: 'VAR', variable: 'items' }, { type: 'input_value', name: 'INDEX', check: 'Number' }, { type: 'input_value', name: 'VALUE' }], previousStatement: null, nextStatement: null, colour: 285 },
 
     // Values and logic.
     { type: 'rbxl_compare', message0: '%1 %2 %3', args0: [{ type: 'input_value', name: 'A', check: 'Number' }, { type: 'field_dropdown', name: 'OP', options: [['=', 'EQ'], ['>', 'GT'], ['<', 'LT'], ['≧', 'GTE'], ['≦', 'LTE'], ['≠', 'NEQ']] }, { type: 'input_value', name: 'B', check: 'Number' }], output: 'Boolean', colour: 210 },
@@ -57,7 +68,12 @@ const toolbox = {
       block('rbxl_move_part'), block('rbxl_set_checkpoint'), block('rbxl_teleport'), block('rbxl_respawn'), block('rbxl_complete')
     ] },
     { kind: 'category', name: '変数', colour: '#a879ce', custom: 'VARIABLE' },
+    { kind: 'category', name: 'データ', colour: '#b18ad5', contents: [
+      block('rbxl_text'), block('rbxl_text_join'), block('rbxl_list_create'),
+      block('rbxl_list_length'), block('rbxl_list_get'), block('rbxl_list_add'), block('rbxl_list_replace')
+    ] },
     { kind: 'category', name: '計算・条件', colour: '#5796d2', contents: [
+      block('rbxl_random'), block('rbxl_elapsed_time'),
       block('rbxl_number'), block('rbxl_compare'), block('math_number'), block('math_arithmetic'),
       block('logic_compare'), block('logic_operation'), block('logic_negate'), block('logic_boolean')
     ] },
