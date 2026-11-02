@@ -106,7 +106,7 @@ export function buildSceneFromWorld(worldJson) {
   };
   const applyPartMatrix = (record) => {
     const slot = slots.get(record.id);
-    if (slot) {
+    if (slot && !record.dynamicMesh) {
       const mesh = meshes.get(slot.key);
       mesh.setMatrixAt(slot.i, matrixFor(record));
       mesh.instanceMatrix.needsUpdate = true;
