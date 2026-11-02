@@ -26,13 +26,14 @@ export function createScriptingRuntime(program, api = {}) {
   let work = MAX_WORK_PER_TICK;
   const warned = new Set();
   const warnOnce = (message) => { if (!warned.has(message)) { warned.add(message); api.onWarning?.(message); } };
-  const read = (node) => {
+  const read = (node, context = {}) => {
     if (typeof node === 'number') return Number.isFinite(node) ? node : 0;
     if (!node || typeof node !== 'object') return 0;
     if (node.op === 'number') { const n = Number(node.value); return Number.isFinite(n) ? clamp(n) : 0; }
     if (node.op === 'boolean') return !!node.value;
+    if (node.op === 'eventGet') return String(context?.[node.property] ?? '').slice(0, 100);
     if (node.op === 'string') return String(node.value ?? '').slice(0, MAX_STRING_LENGTH);
-    if (node.op === 'vector') return (node.values || []).slice(0, 3).map((item) => clamp(Number(read(item))));
+    if (node.op === 'vector') return (node.values || []).slice(0, 3).map((item) => clamp(Number(read(item, context))));
     if (node.op === 'playerGet') {
       if (typeof api.getPlayerProperty !== 'function') { warnOnce('プレイヤー情報の取得APIが利用できません'); return node.property === 'alive' ? false : 0; }
       const result = api.getPlayerProperty(node.player, node.property);
@@ -46,49 +47,49 @@ export function createScriptingRuntime(program, api = {}) {
       return cloneValue(result);
     }
     if (node.op === 'variable') return cloneValue(variables.get(node.name) ?? 0);
-    if (node.op === 'concat') return (String(read(node.a) ?? '') + String(read(node.b) ?? '')).slice(0, MAX_STRING_LENGTH);
-    if (node.op === 'list') return (node.items || []).slice(0, MAX_LIST_ITEMS).map((item) => cloneValue(read(item)));
-    if (node.op === 'listLength') { const list = read(node.list); return Array.isArray(list) ? list.length : 0; }
-    if (node.op === 'listGet') { const list = read(node.list); const index = Math.floor(Number(read(node.index)) || 0) - 1; return Array.isArray(list) && index >= 0 && index < list.length ? cloneValue(list[index]) : ''; }
+    if (node.op === 'concat') return (String(read(node.a, context) ?? '') + String(read(node.b, context) ?? '')).slice(0, MAX_STRING_LENGTH);
+    if (node.op === 'list') return (node.items || []).slice(0, MAX_LIST_ITEMS).map((item) => cloneValue(read(item, context)));
+    if (node.op === 'listLength') { const list = read(node.list, context); return Array.isArray(list) ? list.length : 0; }
+    if (node.op === 'listGet') { const list = read(node.list, context); const index = Math.floor(Number(read(node.index, context)) || 0) - 1; return Array.isArray(list) && index >= 0 && index < list.length ? cloneValue(list[index]) : ''; }
     if (node.op === 'elapsed') return elapsed;
     if (node.op === 'random') {
-      const min = Number(read(node.min)) || 0, max = Number(read(node.max)) || 0;
+      const min = Number(read(node.min, context)) || 0, max = Number(read(node.max, context)) || 0;
       const low = Math.min(min, max), high = Math.max(min, max);
       return Number.isInteger(low) && Number.isInteger(high) ? Math.floor(random() * (high - low + 1)) + low : low + random() * (high - low);
     }
-    if (node.op === 'not') return !read(node.value);
-    if (node.op === 'and') return !!read(node.a) && !!read(node.b);
-    if (node.op === 'or') return !!read(node.a) || !!read(node.b);
+    if (node.op === 'not') return !read(node.value, context);
+    if (node.op === 'and') return !!read(node.a, context) && !!read(node.b, context);
+    if (node.op === 'or') return !!read(node.a, context) || !!read(node.b, context);
     if (node.op === 'compare') {
-      const a = read(node.a), b = read(node.b);
+      const a = read(node.a, context), b = read(node.b, context);
       switch (node.operator) { case 'neq': return a !== b; case 'gt': return a > b; case 'lt': return a < b; case 'gte': return a >= b; case 'lte': return a <= b; default: return a === b; }
     }
     if (node.op === 'unary') {
-      const n = Number(read(node.value)) || 0;
+      const n = Number(read(node.value, context)) || 0;
       switch (node.operator) { case 'ROOT': return clamp(Math.sqrt(Math.max(0,n))); case 'NEG': return clamp(-n); case 'LN': return clamp(Math.log(Math.max(Number.EPSILON,n))); case 'LOG10': return clamp(Math.log10(Math.max(Number.EPSILON,n))); case 'EXP': return clamp(Math.exp(Math.min(20,n))); case 'POW10': return clamp(10 ** Math.min(9,Math.max(-9,n))); default: return clamp(Math.abs(n)); }
     }
     if (node.op === 'math') {
-      const a = Number(read(node.a)) || 0, b = Number(read(node.b)) || 0;
+      const a = Number(read(node.a, context)) || 0, b = Number(read(node.b, context)) || 0;
       switch (node.operator) { case 'sub': return clamp(a-b); case 'mul': return clamp(a*b); case 'div': return b ? clamp(a/b) : 0; case 'mod': return b ? clamp(a%b) : 0; case 'pow': return clamp(Math.pow(a, Math.max(-16, Math.min(16,b)))); default: return clamp(a+b); }
     }
     warnOnce('未対応の値命令をスキップしました: ' + String(node.op || 'unknown').slice(0, 80));
     return 0;
   };
-  function* runSteps(steps, depth = 0) {
+  function* runSteps(steps, depth = 0, context = {}) {
     if (depth > 24) return;
     for (const step of steps || []) {
       if (stopped) return;
       while (work <= 0 && !stopped) yield 0; // 今のフレームの作業量を使い切ったら、次のフレームまで譲る
       work--;
       switch (step.op) {
-        case 'wait': yield Math.max(0, Math.min(60, Number(read(step.seconds)) || 0)); break;
-        case 'if': yield 0; yield* runSteps(read(step.condition) ? step.then : step.otherwise, depth+1); break;
+        case 'wait': yield Math.max(0, Math.min(60, Number(read(step.seconds, context)) || 0)); break;
+        case 'if': yield 0; yield* runSteps(read(step.condition, context) ? step.then : step.otherwise, depth+1, context); break;
         case 'repeat': {
-          const n = Math.max(0, Math.min(MAX_REPEAT, Math.floor(Number(read(step.times)) || 0)));
+          const n = Math.max(0, Math.min(MAX_REPEAT, Math.floor(Number(read(step.times, context)) || 0)));
           for (let i=0; i<n && !stopped; i++) {
             while (work <= 0 && !stopped) yield 0; // 中身が空でも1周ごとに作業量を消費する
             work--;
-            yield* runSteps(step.body, depth+1);
+            yield* runSteps(step.body, depth+1, context);
           }
           break;
         }
@@ -97,46 +98,46 @@ export function createScriptingRuntime(program, api = {}) {
           while (!stopped) { yield 0; yield* runSteps(step.body, depth+1); }
           break;
         case 'addScore': {
-          const amount = clamp(read(step.amount)); score = clamp(score + amount);
+          const amount = clamp(read(step.amount, context)); score = clamp(score + amount);
           variables.set('score', score); api.onScore?.(score, amount); yield 0; break;
         }
-        case 'setVariable': variables.set(step.name, cloneValue(read(step.value))); yield 0; break;
-        case 'changeVariable': variables.set(step.name, clamp((variables.get(step.name)||0) + read(step.value))); yield 0; break;
+        case 'setVariable': variables.set(step.name, cloneValue(read(step.value, context))); yield 0; break;
+        case 'changeVariable': variables.set(step.name, clamp((variables.get(step.name)||0) + read(step.value, context))); yield 0; break;
         case 'message': api.onMessage?.(String(step.text || '').replace(/\{([\wぁ-んァ-ヶ一-龠]+)\}/g, (_, n) => String(variables.get(n) ?? 0))); yield 0; break;
         case 'listAdd': {
           let list = variables.get(step.name);
           if (!Array.isArray(list)) { warnOnce('リスト変数ではないため新しいリストを作成しました: ' + step.name); list = []; }
-          if (list.length < MAX_LIST_ITEMS) list.push(cloneValue(read(step.value)));
+          if (list.length < MAX_LIST_ITEMS) list.push(cloneValue(read(step.value, context)));
           else warnOnce('リストの最大要素数100件に達しました: ' + step.name);
           variables.set(step.name, list); yield 0; break;
         }
         case 'listReplace': {
           const list = variables.get(step.name);
-          const index = Math.floor(Number(read(step.index)) || 0) - 1;
+          const index = Math.floor(Number(read(step.index, context)) || 0) - 1;
           if (!Array.isArray(list) || index < 0 || index >= list.length) warnOnce('リストの置換位置が範囲外です: ' + step.name);
-          else list[index] = cloneValue(read(step.value));
+          else list[index] = cloneValue(read(step.value, context));
           yield 0; break;
         }
         case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'playerSet': {
-          const accepted = api.setPlayerProperty?.(step.player, step.property, read(step.value));
+          const accepted = api.setPlayerProperty?.(step.player, step.property, read(step.value, context));
           if (!accepted) warnOnce('プレイヤーのプロパティを変更できません: ' + String(step.player).slice(0, 100) + ' (' + String(step.property).slice(0, 40) + ')');
           yield 0; break;
         }
         case 'playerDamage': {
-          const accepted = api.damagePlayer?.(step.player, Math.max(0, Number(read(step.amount)) || 0));
+          const accepted = api.damagePlayer?.(step.player, Math.max(0, Number(read(step.amount, context)) || 0));
           if (!accepted) warnOnce('プレイヤーにダメージを適用できません: ' + String(step.player).slice(0, 100));
           yield 0; break;
         }
         case 'playerHeal': {
-          const accepted = api.healPlayer?.(step.player, Math.max(0, Number(read(step.amount)) || 0));
+          const accepted = api.healPlayer?.(step.player, Math.max(0, Number(read(step.amount, context)) || 0));
           if (!accepted) warnOnce('プレイヤーを回復できません: ' + String(step.player).slice(0, 100));
           yield 0; break;
         }
         case 'partSet':
           if (typeof api.setPartProperty === 'function') {
-            const accepted = api.setPartProperty(step.part, step.property, read(step.value));
+            const accepted = api.setPartProperty(step.part, step.property, read(step.value, context));
             if (!accepted) warnOnce('パーツのプロパティを変更できません: ' + String(step.part).slice(0, 100) + ' (' + String(step.property).slice(0, 40) + ')');
           } else warnOnce('パーツのプロパティ設定APIが利用できません');
           yield 0; break;
@@ -149,24 +150,24 @@ export function createScriptingRuntime(program, api = {}) {
       }
     }
   }
-  const launch = (event, target, alias) => {
+  const launch = (event, target, alias, details = {}) => {
     if (stopped || tasks.length >= MAX_TASKS) return;
     for (const item of program?.events || []) {
       if (item.event !== event || (['touch', 'leave'].includes(event) && item.target && item.target !== target && item.target !== alias)) continue;
-      tasks.push({ iterator: runSteps(item.body), wake: elapsed });
+      tasks.push({ iterator: runSteps(item.body, 0, { eventType: event, playerId: details.playerId || '', partId: details.partId || target || '', partName: details.partName || alias || '' }), wake: elapsed });
     }
   };
   return {
     start() { launch('start'); },
-    onSpawn() { launch('spawn'); },
-    onTouch(part) { launch('touch', part?.id, part?.name); },
-    onLeave(part) { launch('leave', part?.id, part?.name); },
+    onSpawn(playerId = 'local') { launch('spawn', '', '', { playerId }); },
+    onTouch(part, playerId = 'local') { launch('touch', part?.id, part?.name, { playerId, partId: part?.id, partName: part?.name }); },
+    onLeave(part, playerId = 'local') { launch('leave', part?.id, part?.name, { playerId, partId: part?.id, partName: part?.name }); },
     update(dt) {
       if (stopped) return;
       elapsed += Math.max(0, Math.min(0.1, dt || 0));
       for (const item of program?.events || []) if (item.event === 'interval') {
         const next = (intervals.get(item) || 0) + Math.max(0, Math.min(0.1, dt || 0));
-        if (next >= item.seconds) { intervals.set(item, next % item.seconds); if (tasks.length < MAX_TASKS) tasks.push({ iterator: runSteps(item.body), wake: elapsed }); }
+        if (next >= item.seconds) { intervals.set(item, next % item.seconds); if (tasks.length < MAX_TASKS) tasks.push({ iterator: runSteps(item.body, 0, { eventType: 'interval', playerId: '', partId: '', partName: '' }), wake: elapsed }); }
         else intervals.set(item, next);
       }
       work = MAX_WORK_PER_TICK;
