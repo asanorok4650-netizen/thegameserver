@@ -72,6 +72,8 @@ export default function BlocklyEditor({ initialState, onChange }) {
   const hostRef = useRef(null);
   const workspaceRef = useRef(null);
   const BlocklyRef = useRef(null);
+  const initialStateRef = useRef(initialState);
+  initialStateRef.current = initialState;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -81,13 +83,11 @@ export default function BlocklyEditor({ initialState, onChange }) {
     let resizeObserver = null;
     let timer = null;
     let listener = null;
-    let BlocklyApi = null;
 
     (async () => {
       try {
         const [Blockly] = await Promise.all([import('blockly'), import('blockly/blocks')]);
         if (disposed) return;
-        BlocklyApi = Blockly;
         BlocklyRef.current = Blockly;
         registerBlocks(Blockly);
         workspace = Blockly.inject(hostRef.current, {
@@ -116,8 +116,9 @@ export default function BlocklyEditor({ initialState, onChange }) {
           move: { scrollbars: true, drag: true, wheel: true }
         });
         workspaceRef.current = workspace;
-        if (initialState && typeof initialState === 'object') {
-          try { Blockly.serialization.workspaces.load(initialState, workspace); }
+        const savedState = initialStateRef.current;
+        if (savedState && typeof savedState === 'object') {
+          try { Blockly.serialization.workspaces.load(savedState, workspace); }
           catch (error) { console.warn('Blockly workspace could not be restored:', error); }
         }
         listener = (event) => {
