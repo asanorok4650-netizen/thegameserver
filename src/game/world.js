@@ -80,7 +80,7 @@ export function buildSceneFromWorld(worldJson) {
       pending.push(entry);
       stats.dynamic++;
     }
-    partRecords.set(p.id, { id: p.id, name: p.name, shape, color: p.color, transparency: t, collide: !!p.collide, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: true, item, trigger: ruleTrigger, entry, dynamicMesh: null });
+    partRecords.set(p.id, { id: p.id, name: p.name, shape, color: p.color, transparency: t, collide: !!p.collide, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: true, item, trigger: ruleTrigger, tagTrigger: trigger, entry, dynamicMesh: null });
   }
 
   const group = new THREE.Group();
@@ -153,6 +153,7 @@ export function buildSceneFromWorld(worldJson) {
     }
     record.visible = nextVisible;
     record.trigger.enabled = nextVisible;
+    if (record.tagTrigger) record.tagTrigger.enabled = nextVisible;
     applyPartMatrix(record);
     return true;
   };
@@ -161,6 +162,7 @@ export function buildSceneFromWorld(worldJson) {
     if (!record || !Array.isArray(position) || position.length !== 3 || !position.every(Number.isFinite)) return false;
     record.pos = position.map((v) => Math.max(-100000, Math.min(100000, v)));
     record.trigger.pos = record.pos.slice();
+    if (record.tagTrigger) record.tagTrigger.pos = record.pos.slice();
     if (record.entry) {
       record.entry.base.pos = record.pos.slice();
       record.entry.pose = { pos: record.pos.slice(), rot: record.rot.slice() };
@@ -187,6 +189,7 @@ export function buildSceneFromWorld(worldJson) {
       if (record.collide && record.visible && record.item) collision.remove(record.item);
       record.size = value.slice();
       record.trigger.size = value.slice(); record.trigger.half = value.map((v) => v / 2);
+      if (record.tagTrigger) record.tagTrigger.half = value.map((v) => v / 2);
       if (record.item) {
         record.item.half = value.map((v) => v / 2);
         if (record.item.type === 'ball') record.item.radius = Math.max(...value) / 2;
@@ -200,6 +203,7 @@ export function buildSceneFromWorld(worldJson) {
     if (property === 'position') {
       if (!finiteVector || value.some((v) => Math.abs(v) > 100000)) return false;
       record.pos = value.slice(); record.trigger.pos = record.pos.slice();
+      if (record.tagTrigger) record.tagTrigger.pos = record.pos.slice();
       if (record.entry) { record.entry.base.pos = record.pos.slice(); record.entry.pose.pos = record.pos.slice(); }
       if (record.item && record.collide && record.visible) collision.moveItem(record.item, record.pos, record.rot);
       applyPartMatrix(record);
@@ -211,8 +215,9 @@ export function buildSceneFromWorld(worldJson) {
       const matrix = new THREE.Matrix4().makeRotationFromEuler(euler).elements;
       record.rot = [matrix[0], matrix[4], matrix[8], matrix[1], matrix[5], matrix[9], matrix[2], matrix[6], matrix[10]];
       record.trigger.rot = record.rot.slice();
+      if (record.tagTrigger) record.tagTrigger.rot = record.rot.slice();
       if (record.entry) { record.entry.base.rot = record.rot.slice(); record.entry.pose.rot = record.rot.slice(); }
-      if (record.item && record.collide) collision.moveItem(record.item, record.pos, record.rot);
+      if (record.item && record.collide && record.visible) collision.moveItem(record.item, record.pos, record.rot);
       applyPartMatrix(record);
       return true;
     }
