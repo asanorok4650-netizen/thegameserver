@@ -301,7 +301,7 @@ export class Game {
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
         if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger, 'local'); }
-        else if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger);
+        else if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger, 'local');
       }
       this.activeRuleTriggers = active;
     }
