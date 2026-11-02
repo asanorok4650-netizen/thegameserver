@@ -73,7 +73,7 @@ export function createBlocklyRuntime(program, api = {}) {
   const launch = (event, target, alias) => {
     if (stopped || tasks.length >= MAX_TASKS) return;
     for (const item of program?.events || []) {
-      if (item.event !== event || (event === 'touch' && item.target && item.target !== target && item.target !== alias)) continue;
+      if (item.event !== event || (['touch', 'leave'].includes(event) && item.target && item.target !== target && item.target !== alias)) continue;
       tasks.push({ iterator: runSteps(item.body), wake: elapsed });
     }
   };
