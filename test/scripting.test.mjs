@@ -264,3 +264,76 @@ test('all custom event roots compile to their expected event types', () => {
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.events.map((event) => event.event), ['start', 'touch', 'leave', 'spawn', 'interval']);
 });
+
+
+test('M1-B compiles and runs string literals, concatenation and polymorphic variables', () => {
+  const joined = statement('rbxl_text_join', {}, {
+    A: { block: value('rbxl_text', { TEXT: 'Hello ' }) },
+    B: { block: value('rbxl_text', { TEXT: 'RBXL' }) }
+  });
+  const set = statement('rbxl_set_variable', { NAME: 'greeting' }, { VALUE: { block: joined } });
+  const program = compileBlocklyWorkspace(start(set));
+  assert.deepEqual(program.errors, []);
+  const runtime = createBlocklyRuntime(program);
+  runtime.start();
+  runtime.update(0.016);
+  assert.equal(runtime.getVariables().greeting, 'Hello RBXL');
+});
+
+test('M1-B supports list creation, length, one-based get, append and replace', () => {
+  const variable = { id: 'items-id', name: 'items' };
+  const getVariable = () => value('variables_get', { VAR: variable });
+  const number = (n) => value('math_number', { NUM: n });
+  const textValue = (s) => value('rbxl_text', { TEXT: s });
+  const blocks = [
+    statement('rbxl_set_variable', { NAME: 'items' }, {
+      VALUE: { block: statement('rbxl_list_create', {}, {
+        ADD0: { block: textValue('apple') }, ADD1: { block: number(2) }, ADD2: { block: value('logic_boolean', { BOOL: 'TRUE' }) }
+      }) }
+    }),
+    statement('rbxl_list_add', { VAR: variable }, { VALUE: { block: textValue('pear') } }),
+    statement('rbxl_list_replace', { VAR: variable }, { INDEX: { block: number(2) }, VALUE: { block: textValue('orange') } }),
+    statement('rbxl_set_variable', { NAME: 'listLength' }, { VALUE: { block: statement('rbxl_list_length', {}, { LIST: { block: getVariable() } }) } }),
+    statement('rbxl_set_variable', { NAME: 'secondItem' }, { VALUE: { block: statement('rbxl_list_get', {}, { LIST: { block: getVariable() }, INDEX: { block: number(2) } }) } })
+  ];
+  for (let i = 0; i < blocks.length - 1; i++) blocks[i].next = { block: blocks[i + 1] };
+  const workspace = { variables: [variable], blocks: { blocks: [start(blocks[0]).blocks.blocks[0]] } };
+  const program = compileBlocklyWorkspace(workspace);
+  assert.deepEqual(program.errors, []);
+  const runtime = createBlocklyRuntime(program);
+  runtime.start();
+  runtime.update(0.016);
+  assert.deepEqual(runtime.getVariables().items, ['apple', 'orange', true, 'pear']);
+  assert.equal(runtime.getVariables().listLength, 4);
+  assert.equal(runtime.getVariables().secondItem, 'orange');
+});
+
+test('M1-B seeded random is repeatable, bounded and resets with the runtime', () => {
+  const program = { version: 1, randomSeed: 12345, events: [{ event: 'start', body: [
+    { op: 'setVariable', name: 'roll', value: { op: 'random', min: { op: 'number', value: 1 }, max: { op: 'number', value: 6 } } }
+  ] }] };
+  const create = () => {
+    const runtime = createBlocklyRuntime(program);
+    runtime.start();
+    runtime.update(0.016);
+    return runtime;
+  };
+  const first = create();
+  const second = create();
+  assert.equal(first.getVariables().roll, second.getVariables().roll);
+  assert.ok(first.getVariables().roll >= 1 && first.getVariables().roll <= 6);
+  const previous = first.getVariables().roll;
+  first.reset();
+  first.start();
+  first.update(0.016);
+  assert.equal(first.getVariables().roll, previous);
+});
+
+test('M1-B elapsed-time expression returns bounded runtime elapsed seconds', () => {
+  const runtime = createBlocklyRuntime({ version: 1, events: [{ event: 'start', body: [
+    { op: 'setVariable', name: 'elapsed', value: { op: 'elapsed' } }
+  ] }] });
+  runtime.start();
+  runtime.update(0.1);
+  assert.equal(runtime.getVariables().elapsed, 0.1);
+});
