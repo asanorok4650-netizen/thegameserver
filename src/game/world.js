@@ -35,6 +35,7 @@ export function buildSceneFromWorld(worldJson) {
   const dynamics = new Dynamics(collision);
   const slots = new Map(); // partId → { key, i }(動くパーツの見た目を更新するため)
   const pending = [];
+  const partRecords = new Map();
 
   for (const p of worldJson.parts) {
     const [sx, sy, sz] = p.size, m = p.rot, pos = p.pos;
@@ -74,11 +75,13 @@ export function buildSceneFromWorld(worldJson) {
       collision.add(item);
       stats.collidable++;
     }
+    let entry = null;
     if (isMotion(behavior)) {
-      const entry = dynamics.add({ base: { pos: pos.slice(), rot: m.slice() }, behavior, item, trigger: ruleTrigger, size: [sx, sy, sz], id: p.id });
+      entry = dynamics.add({ base: { pos: pos.slice(), rot: m.slice() }, behavior, item, trigger: ruleTrigger, size: [sx, sy, sz], id: p.id });
       pending.push(entry);
       stats.dynamic++;
     }
+    partRecords.set(p.id, { id: p.id, name: p.name, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: t < 0.99, item, trigger: ruleTrigger, entry });
   }
 
   const group = new THREE.Group();
@@ -96,18 +99,45 @@ export function buildSceneFromWorld(worldJson) {
     stats.drawn += b.list.length;
   }
   const tmp = new THREE.Matrix4(), scl = new THREE.Matrix4();
-  for (const e of pending) {
-    const slot = slots.get(e.id);
-    if (!slot) continue;
+  const applyPartMatrix = (record) => {
+    const slot = slots.get(record.id);
+    if (!slot) return;
     const mesh = meshes.get(slot.key);
+    const q = record.pos, r = record.rot;
+    tmp.set(r[0], r[1], r[2], q[0], r[3], r[4], r[5], q[1], r[6], r[7], r[8], q[2], 0, 0, 0, 1);
+    tmp.multiply(scl.makeScale(record.visible ? record.size[0] : 0, record.visible ? record.size[1] : 0, record.visible ? record.size[2] : 0));
+    mesh.setMatrixAt(slot.i, tmp);
+    mesh.instanceMatrix.needsUpdate = true;
+  };
+  for (const e of pending) {
+    const record = partRecords.get(e.id);
     e.apply = (pose) => {
-      const r = pose.rot, q = pose.pos;
-      tmp.set(r[0], r[1], r[2], q[0], r[3], r[4], r[5], q[1], r[6], r[7], r[8], q[2], 0, 0, 0, 1);
-      tmp.multiply(scl.makeScale(e.size[0], e.size[1], e.size[2]));
-      mesh.setMatrixAt(slot.i, tmp);
-      mesh.instanceMatrix.needsUpdate = true;
+      record.pos = pose.pos.slice();
+      record.rot = pose.rot.slice();
+      applyPartMatrix(record);
     };
   }
+  const findRecord = (key) => [...partRecords.values()].find((p) => p.id === key || p.name === key);
+  const setPartVisible = (key, visible) => {
+    const record = findRecord(key);
+    if (!record) return false;
+    record.visible = !!visible;
+    applyPartMatrix(record);
+    return true;
+  };
+  const movePart = (key, position) => {
+    const record = findRecord(key);
+    if (!record || !Array.isArray(position) || position.length !== 3 || !position.every(Number.isFinite)) return false;
+    record.pos = position.map((v) => Math.max(-100000, Math.min(100000, v)));
+    record.trigger.pos = record.pos.slice();
+    if (record.entry) {
+      record.entry.base.pos = record.pos.slice();
+      record.entry.pose = { pos: record.pos.slice(), rot: record.rot.slice() };
+    }
+    if (record.item) collision.moveItem(record.item, record.pos, record.rot);
+    applyPartMatrix(record);
+    return true;
+  };
 
   let spawn;
   const spawns = worldJson.spawns || [];
@@ -119,7 +149,7 @@ export function buildSceneFromWorld(worldJson) {
     const top = collision.highestTopAt(0, 0), b = collision.bounds();
     spawn = top !== null ? [0, top + 0.2, 0] : b ? [(b.min[0] + b.max[0]) / 2, b.max[1] + 10, (b.min[2] + b.max[2]) / 2] : [0, 10, 0];
   }
-  return { group, collision, triggers, ruleTriggers, ruleParts: ruleTriggers, dynamics, environment: resolveEnvironment(worldJson.environment), spawn, stats };
+  return { group, collision, triggers, ruleTriggers, ruleParts: ruleTriggers, dynamics, setPartVisible, movePart, environment: resolveEnvironment(worldJson.environment), spawn, stats };
 }
 
 export function buildWorld(tree, log = () => {}) {
