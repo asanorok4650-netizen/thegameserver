@@ -57,6 +57,7 @@ export function createProgramIR({ workspace, eventRules } = {}) {
   const legacyProgram = eventRulesToIR(eventRules);
   const events = [...legacyProgram.events, ...blockProgram.events];
   const variables = new Map();
+  for (const v of blockProgram.variables || []) if (v.name && !variables.has(v.name)) variables.set(v.name, v.initial);
   for (const event of events) for (const v of event.variables || []) if (!variables.has(v.name)) variables.set(v.name, v.initial);
   return { version: 1, events: events.map(({ variables: _variables, ...event }) => event), variables: [...variables].map(([name, initial]) => ({ name, initial })), errors: blockProgram.errors || [] };
 }
