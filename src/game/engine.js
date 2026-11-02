@@ -202,7 +202,9 @@ export class Game {
   }
 
   setPlayerProperty(player, property, value) {
-    if (player !== 'local' || typeof value !== 'number' || !Number.isFinite(value)) return false;
+    if (player !== 'local') return false;
+    if (property === 'position') return this.setPlayerPosition(player, value);
+    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
     if (property === 'health') {
       this.playerStats.health = Math.max(0, Math.min(this.playerStats.maxHealth, value));
       this.playerStats.alive = this.playerStats.health > 0;
