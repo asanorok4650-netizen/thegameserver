@@ -9,7 +9,7 @@ import { sphereIntersectsOBB } from './collision.js';
 import { createLogicRuntime } from '../logics/index.js';
 import { createProgramIR } from '../scripting/ir.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
-import { createBlocklyRuntime } from '../scripting/runtime.js';
+import { createScriptingRuntime } from '../scripting/runtime.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
@@ -140,7 +140,7 @@ export class Game {
       return [part.pos[0], part.pos[1] + part.size[1] / 2 + 0.2, part.pos[2]];
     };
     this.scriptRuntime?.stop?.();
-    this.scriptRuntime = createBlocklyRuntime(program, {
+    this.scriptRuntime = createScriptingRuntime(program, {
       onScore: handlers.onScore,
       onMessage: handlers.onMessage,
       onWarning: handlers.onWarning,
