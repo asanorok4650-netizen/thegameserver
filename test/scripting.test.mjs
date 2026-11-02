@@ -128,7 +128,7 @@ test('toolbox standard math and variable blocks compile and execute', () => {
   });
   const workspace = {
     variables: [{ id: 'coins-id', name: 'coins' }],
-    blocks: { blocks: [start(statement('variables_set', {}, {
+    blocks: { blocks: [start(statement('variables_set', { VAR: { id: 'coins-id', name: 'coins' } }, {
       VALUE: { block: value('math_number', { NUM: 3 }) }
     }, statement('rbxl_add_score', {}, {
       VALUE: { block: value('variables_get', { VAR: { id: 'coins-id', name: 'coins' } }) }
