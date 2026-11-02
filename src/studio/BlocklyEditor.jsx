@@ -1,10 +1,8 @@
 import { useEffect, useRef } from 'react';
-import * as Blockly from 'blockly';
-import 'blockly/blocks';
 import './blockly-editor.css';
 
 let registered = false;
-function registerBlocks() {
+function registerBlocks(Blockly) {
   if (registered) return;
   registered = true;
   const definitions = [
@@ -73,55 +71,72 @@ export default function BlocklyEditor({ initialState, onChange }) {
   onChangeRef.current = onChange;
 
   useEffect(() => {
-    registerBlocks();
-    const workspace = Blockly.inject(hostRef.current, {
-      toolbox,
-      renderer: 'zelos',
-      theme: Blockly.Theme.defineTheme('rbxlTheme', {
-        base: Blockly.Themes.Classic,
-        componentStyles: {
-          workspaceBackgroundColour: '#f4f6fa',
-          toolboxBackgroundColour: '#ffffff',
-          toolboxForegroundColour: '#39445a',
-          flyoutBackgroundColour: '#ffffff',
-          flyoutForegroundColour: '#39445a',
-          flyoutOpacity: 1,
-          scrollbarColour: '#b8c1d1',
-          insertionMarkerColour: '#335cff',
-          insertionMarkerOpacity: 0.25,
-          scrollbarOpacity: 0.5,
-          cursorColour: '#335cff'
+    let disposed = false;
+    let workspace = null;
+    let resizeObserver = null;
+    let timer = null;
+    let listener = null;
+    let BlocklyApi = null;
+
+    (async () => {
+      try {
+        const [Blockly] = await Promise.all([import('blockly'), import('blockly/blocks')]);
+        if (disposed) return;
+        BlocklyApi = Blockly;
+        registerBlocks(Blockly);
+        workspace = Blockly.inject(hostRef.current, {
+          toolbox,
+          renderer: 'zelos',
+          theme: Blockly.Theme.defineTheme('rbxlTheme', {
+            base: Blockly.Themes.Classic,
+            componentStyles: {
+              workspaceBackgroundColour: '#f4f6fa',
+              toolboxBackgroundColour: '#ffffff',
+              toolboxForegroundColour: '#39445a',
+              flyoutBackgroundColour: '#ffffff',
+              flyoutForegroundColour: '#39445a',
+              flyoutOpacity: 1,
+              scrollbarColour: '#b8c1d1',
+              insertionMarkerColour: '#335cff',
+              insertionMarkerOpacity: 0.25,
+              scrollbarOpacity: 0.5,
+              cursorColour: '#335cff'
+            }
+          }),
+          trashcan: true,
+          sounds: false,
+          grid: { spacing: 24, length: 3, colour: '#dce2ec', snap: true },
+          zoom: { controls: true, wheel: true, startScale: 0.9, maxScale: 1.6, minScale: 0.45, scaleSpeed: 1.1 },
+          move: { scrollbars: true, drag: true, wheel: true }
+        });
+        workspaceRef.current = workspace;
+        if (initialState && typeof initialState === 'object') {
+          try { Blockly.serialization.workspaces.load(initialState, workspace); }
+          catch (error) { console.warn('Blockly workspace could not be restored:', error); }
         }
-      }),
-      trashcan: true,
-      sounds: false,
-      grid: { spacing: 24, length: 3, colour: '#dce2ec', snap: true },
-      zoom: { controls: true, wheel: true, startScale: 0.9, maxScale: 1.6, minScale: 0.45, scaleSpeed: 1.1 },
-      move: { scrollbars: true, drag: true, wheel: true }
-    });
-    workspaceRef.current = workspace;
-    if (initialState && typeof initialState === 'object') {
-      try { Blockly.serialization.workspaces.load(initialState, workspace); }
-      catch (error) { console.warn('Blockly workspace could not be restored:', error); }
-    }
-    let timer;
-    const listener = (event) => {
-      if (event.isUiEvent || event.type === Blockly.Events.FINISHED_LOADING) return;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        try { onChangeRef.current?.(Blockly.serialization.workspaces.save(workspace)); }
-        catch (error) { console.warn('Blockly workspace could not be saved:', error); }
-      }, 250);
-    };
-    workspace.addChangeListener(listener);
-    const resizeObserver = new ResizeObserver(() => Blockly.svgResize(workspace));
-    resizeObserver.observe(hostRef.current);
-    Blockly.svgResize(workspace);
+        listener = (event) => {
+          if (event.isUiEvent || event.type === Blockly.Events.FINISHED_LOADING) return;
+          clearTimeout(timer);
+          timer = setTimeout(() => {
+            try { onChangeRef.current?.(Blockly.serialization.workspaces.save(workspace)); }
+            catch (error) { console.warn('Blockly workspace could not be saved:', error); }
+          }, 250);
+        };
+        workspace.addChangeListener(listener);
+        resizeObserver = new ResizeObserver(() => Blockly.svgResize(workspace));
+        resizeObserver.observe(hostRef.current);
+        Blockly.svgResize(workspace);
+      } catch (error) {
+        if (!disposed) console.error('Blocklyの読み込みに失敗しました:', error);
+      }
+    })();
+
     return () => {
+      disposed = true;
       clearTimeout(timer);
-      resizeObserver.disconnect();
-      workspace.removeChangeListener(listener);
-      workspace.dispose();
+      resizeObserver?.disconnect();
+      if (workspace && listener) workspace.removeChangeListener(listener);
+      workspace?.dispose();
       workspaceRef.current = null;
     };
   }, []);
@@ -133,10 +148,10 @@ export default function BlocklyEditor({ initialState, onChange }) {
     const workspace = workspaceRef.current;
     if (!workspace) return;
     try {
-      const current = Blockly.serialization.workspaces.save(workspace);
+      const current = workspace.save ? workspace.save() : null;
       if (JSON.stringify(current) === JSON.stringify(initialState || {})) return;
       workspace.clear();
-      if (initialState && typeof initialState === 'object') Blockly.serialization.workspaces.load(initialState, workspace);
+      if (initialState && typeof initialState === 'object') workspace.load?.(initialState);
     } catch (error) {
       console.warn('Blockly workspace could not be updated:', error);
     }
