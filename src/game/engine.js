@@ -147,7 +147,7 @@ export class Game {
       onMessage: handlers.onMessage,
       onWarning: handlers.onWarning,
       setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; },
-      teleportToPart: (key, player = 'local') => { const p = atPart(key); if (player === 'local' && p) { this.p.set(...p); this.vel.set(0,0,0); this.grounded = false; } },
+      teleportToPart: (key, player = 'local') => { if (player !== 'local') return false; const p = atPart(key); if (!p) return false; this.p.set(...p); this.vel.set(0,0,0); this.grounded = false; return true; },
       checkpointAtPart: (key) => { const p = atPart(key); if (p) this.spawn = p; },
       respawn: () => this.respawn(),
       complete: () => {
