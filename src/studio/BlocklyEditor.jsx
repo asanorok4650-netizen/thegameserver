@@ -67,6 +67,7 @@ const toolbox = {
 export default function BlocklyEditor({ initialState, onChange }) {
   const hostRef = useRef(null);
   const workspaceRef = useRef(null);
+  const BlocklyRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -83,6 +84,7 @@ export default function BlocklyEditor({ initialState, onChange }) {
         const [Blockly] = await Promise.all([import('blockly'), import('blockly/blocks')]);
         if (disposed) return;
         BlocklyApi = Blockly;
+        BlocklyRef.current = Blockly;
         registerBlocks(Blockly);
         workspace = Blockly.inject(hostRef.current, {
           toolbox,
@@ -138,6 +140,7 @@ export default function BlocklyEditor({ initialState, onChange }) {
       if (workspace && listener) workspace.removeChangeListener(listener);
       workspace?.dispose();
       workspaceRef.current = null;
+      BlocklyRef.current = null;
     };
   }, []);
 
@@ -146,12 +149,13 @@ export default function BlocklyEditor({ initialState, onChange }) {
     if (lastExternalState.current === initialState) return;
     lastExternalState.current = initialState;
     const workspace = workspaceRef.current;
-    if (!workspace) return;
+    const Blockly = BlocklyRef.current;
+    if (!workspace || !Blockly) return;
     try {
-      const current = workspace.save ? workspace.save() : null;
+      const current = Blockly.serialization.workspaces.save(workspace);
       if (JSON.stringify(current) === JSON.stringify(initialState || {})) return;
       workspace.clear();
-      if (initialState && typeof initialState === 'object') workspace.load?.(initialState);
+      if (initialState && typeof initialState === 'object') Blockly.serialization.workspaces.load(initialState, workspace);
     } catch (error) {
       console.warn('Blockly workspace could not be updated:', error);
     }
