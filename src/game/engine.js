@@ -152,8 +152,8 @@ export class Game {
         this.completed = true; this.keys.clear(); this.joy.x = 0; this.joy.y = 0;
         this.jumpHeld = false; this.vel.set(0,0,0); this.logicHandlers.onComplete?.();
       },
-      setPartVisible: (key, visible) => this.world?.setPartVisible?.(key, visible),
-      movePart: (key, position) => this.world?.movePart?.(key, position)
+      setPartVisible: (key, visible) => { if (!this.world?.setPartVisible?.(key, visible)) handlers.onWarning?.('表示を変更するパーツが見つかりません: ' + key); },
+      movePart: (key, position) => { if (!this.world?.movePart?.(key, position)) handlers.onWarning?.('移動するパーツが見つからないか、座標が不正です: ' + key); }
     });
     this.scriptRuntime.start();
   }
