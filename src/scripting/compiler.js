@@ -82,6 +82,9 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_move_part':
           out.push({ op: 'movePart', part: String(field(block, 'PART', '')).slice(0, 100), position: ['X','Y','Z'].map((k) => Number(field(block, k, 0)) || 0) }); break;
         case 'rbxl_set_checkpoint': out.push({ op: 'checkpoint' }); break;
+        case 'rbxl_teleport': out.push({ op: 'teleportToPart', part: String(field(block, 'PART', '')).slice(0, 100) }); break;
+        case 'rbxl_respawn': out.push({ op: 'respawn' }); break;
+        case 'rbxl_complete': out.push({ op: 'complete' }); break;
         default:
           if (!String(block.type).startsWith('variables_')) errors.push('未対応の処理ブロック: ' + block.type);
       }
@@ -93,7 +96,7 @@ export function compileBlocklyWorkspace(workspace) {
   const events = [];
   for (const root of workspace.blocks.blocks) {
     const eventMap = {
-      rbxl_when_start: 'start', rbxl_when_touch: 'touch',
+      rbxl_when_start: 'start', rbxl_when_touch: 'touch', rbxl_when_leave: 'leave',
       rbxl_when_player_spawn: 'spawn', rbxl_when_interval: 'interval'
     };
     const event = eventMap[root.type];
