@@ -9,8 +9,8 @@ const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
   'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_part_get_number'
 ]);
-const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join', 'rbxl_part_get_color']);
-const COLOR_BLOCKS = new Set(['rbxl_color']);
+const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join']);
+const COLOR_BLOCKS = new Set(['rbxl_color', 'rbxl_part_get_color']);
 const LIST_BLOCKS = new Set(['rbxl_list_create']);
 const BOOLEAN_BLOCKS = new Set([
   'rbxl_compare', 'logic_compare', 'logic_operation',
@@ -58,6 +58,7 @@ export function compileBlocklyWorkspace(workspace) {
     if (!child) {
       if (expected === 'Boolean') return { op: 'boolean', value: false };
       if (expected === 'String') return { op: 'string', value: '' };
+      if (expected === 'Colour') return { op: 'string', value: '#ff0000' };
       if (expected === 'Array') return { op: 'list', items: [] };
       if (expected === 'Any') return { op: 'string', value: '' };
       return { op: 'number', value: 0 };
