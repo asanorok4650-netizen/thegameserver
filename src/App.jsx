@@ -37,7 +37,7 @@ export default function App() {
   return (
     <div className="app-shell">
       {page === 'studio' && <ErrorBoundary onExit={() => navigate('home')}><StudioPage onExit={() => navigate('home')} /></ErrorBoundary>}
-      {playing && <GameView server={playing} desc={avatar.desc} onExit={() => setPlaying(null)} />}
+      {playing && <GameView server={playing} desc={avatar.desc} playerName={avatar.user?.displayName} onExit={() => setPlaying(null)} />}
       <Sidebar page={page} open={sidebarOpen} onNavigate={navigate} user={avatar.user} />
       <main className="main-area">
         <Topbar

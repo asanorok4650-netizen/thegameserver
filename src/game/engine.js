@@ -10,6 +10,7 @@ import { createLogicRuntime } from '../logics/index.js';
 import { createProgramIR } from '../scripting/ir.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
 import { createScriptingRuntime } from '../scripting/runtime.js';
+import { RemotePlayers } from './remote.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
@@ -32,6 +33,8 @@ export class Game {
     this.floor = null;
     this.time = 0; // 動くパーツ用の経過時間(秒)。世界の時計なので復活・やり直しでは戻さない
     this.setEnvironment(defaultEnvironment());
+    this.remote = new RemotePlayers(this.scene); // マルチプレイ: 他プレイヤーの表示
+    this.netClock = null; // マルチプレイ(クライアント): ホストの世界時刻(秒)を返す関数。null なら自分の時計だけ
 
     this.p = new THREE.Vector3();
     this.vel = new THREE.Vector3();
@@ -190,6 +193,11 @@ export class Game {
     this.avatar = built;
   }
 
+  /** マルチプレイで送る自分の状態: [x, y, z, 向き, 速さ, 接地] */
+  getNetState() {
+    return [this.p.x, this.p.y, this.p.z, this.heading, Math.hypot(this.vel.x, this.vel.z), this.grounded ? 1 : 0];
+  }
+
   getPlayerProperty(player, property) {
     if (player !== 'local') return null;
     const values = {
@@ -311,6 +319,11 @@ export class Game {
     dt = Math.min(dt, 0.05);
     if (this.completed) return;
     this.time += dt;
+    const hostTime = this.netClock?.();
+    if (hostTime != null) { // ホストの時計になめらかに合わせる(動くパーツが全員で同じ位置になる)
+      if (Math.abs(hostTime - this.time) > 2) this.time = hostTime;
+      else this.time += (hostTime - this.time) * Math.min(1, dt * 2);
+    }
     if (!this.playerStats.alive) {
       this.vel.set(0, 0, 0);
       this.logicRuntime?.update?.({ position: this.p, dt });
@@ -380,6 +393,7 @@ export class Game {
     const dt = (now - this.last) / 1000;
     this.last = now;
     if (this.world) this.update(dt);
+    this.remote.update(dt);
     const cp = Math.cos(this.pitch);
     const tx = this.p.x, ty = this.p.y + this.height * 0.75, tz = this.p.z;
     this.camera.position.set(tx + Math.sin(this.yaw) * cp * this.dist, ty + Math.sin(this.pitch) * this.dist, tz + Math.cos(this.yaw) * cp * this.dist);
@@ -389,6 +403,7 @@ export class Game {
 
   dispose() {
     this.scriptRuntime?.stop?.();
+    this.remote.dispose();
     this.renderer.setAnimationLoop(null);
     this.ro.disconnect();
     window.removeEventListener('keydown', this._onKey);

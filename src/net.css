@@ -1,0 +1,12 @@
+/* マルチプレイのパネル(ゲーム画面の右上) */
+.net-panel{position:absolute;top:56px;right:12px;width:min(280px,calc(100% - 24px));z-index:30;background:#000000cc;color:#fff;border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;font-size:13px}
+.net-row{display:flex;gap:8px}
+.net-input{flex:1;min-width:0;border:1px solid #ffffff40;border-radius:10px;background:#ffffff18;color:#fff;padding:8px 10px;font:600 15px monospace;letter-spacing:2px;text-transform:uppercase}
+.net-btn{border:0;border-radius:10px;background:#3b82f6;color:#fff;padding:9px 12px;font:600 13px inherit;cursor:pointer}
+.net-btn:disabled{opacity:.5}
+.net-leave{background:#6b7280}
+.net-label{opacity:.7;font-size:11px;text-align:center}
+.net-code{font:700 28px monospace;letter-spacing:6px;text-align:center}
+.net-players{margin:0;padding:0 0 0 18px}
+.net-note{opacity:.7;font-size:11px}
+.net-msg{opacity:.9;font-size:12px}
