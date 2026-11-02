@@ -7,14 +7,14 @@ const MAX_NUMBER = 1e9;
 
 const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
-  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time'
+  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_part_get_number'
 ]);
 const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join', 'rbxl_part_get_color']);
 const COLOR_BLOCKS = new Set(['rbxl_color']);
 const LIST_BLOCKS = new Set(['rbxl_list_create']);
 const BOOLEAN_BLOCKS = new Set([
   'rbxl_compare', 'logic_compare', 'logic_operation',
-  'logic_negate', 'logic_boolean'
+  'logic_negate', 'logic_boolean', 'rbxl_part_get_collision'
 ]);
 
 export function compileBlocklyWorkspace(workspace) {
