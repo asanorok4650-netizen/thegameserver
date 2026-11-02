@@ -9,6 +9,7 @@ function registerBlocks(Blockly) {
     // Events: hats are roots, but expose a next connection for their script.
     { type: 'rbxl_when_start', message0: 'ゲームが始まったとき', hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_touch', message0: 'パーツ %1 に触れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', nextStatement: null, colour: 25 },
+    { type: 'rbxl_when_leave', message0: 'パーツ %1 から離れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_player_spawn', message0: 'プレイヤーがスポーンしたとき', hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_interval', message0: '%1 秒ごと', args0: [{ type: 'field_number', name: 'SECONDS', value: 1, min: 0.1, max: 3600, precision: 0.1 }], hat: 'cap', nextStatement: null, colour: 25 },
 
@@ -25,6 +26,9 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_part_visible', message0: 'パーツ %1 を表示 %2', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_checkbox', name: 'VISIBLE', checked: true }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_move_part', message0: 'パーツ %1 の位置を X %2 Y %3 Z %4 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'X', value: 0 }, { type: 'field_number', name: 'Y', value: 0 }, { type: 'field_number', name: 'Z', value: 0 }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_set_checkpoint', message0: 'チェックポイントを設定する', previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_teleport', message0: 'プレイヤーをパーツ %1 に移動する', args0: [{ type: 'field_input', name: 'PART', text: 'Spawn' }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_respawn', message0: 'プレイヤーをリスポーンさせる', previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_complete', message0: 'ゲームをクリアにする', previousStatement: null, nextStatement: null, colour: 145 },
 
     // Variables. Keep the Phase 1 text-name block for saved-workspace compatibility.
     { type: 'rbxl_set_variable', message0: '変数 %1 を %2 にする', args0: [{ type: 'field_input', name: 'NAME', text: 'coins' }, { type: 'input_value', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 330 },
@@ -43,14 +47,14 @@ const toolbox = {
   kind: 'categoryToolbox',
   contents: [
     { kind: 'category', name: 'イベント', colour: '#e6a23c', contents: [
-      block('rbxl_when_start'), block('rbxl_when_touch'), block('rbxl_when_player_spawn'), block('rbxl_when_interval')
+      block('rbxl_when_start'), block('rbxl_when_touch'), block('rbxl_when_leave'), block('rbxl_when_player_spawn'), block('rbxl_when_interval')
     ] },
     { kind: 'category', name: '制御', colour: '#d6a23a', contents: [
       block('rbxl_wait'), block('rbxl_if'), block('rbxl_if_else'), block('rbxl_repeat'), block('rbxl_forever')
     ] },
     { kind: 'category', name: 'アクション', colour: '#43a879', contents: [
       block('rbxl_add_score'), block('rbxl_show_message'), block('rbxl_part_visible'),
-      block('rbxl_move_part'), block('rbxl_set_checkpoint')
+      block('rbxl_move_part'), block('rbxl_set_checkpoint'), block('rbxl_teleport'), block('rbxl_respawn'), block('rbxl_complete')
     ] },
     { kind: 'category', name: '変数', colour: '#a879ce', custom: 'VARIABLE' },
     { kind: 'category', name: '計算・条件', colour: '#5796d2', contents: [
