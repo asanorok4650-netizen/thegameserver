@@ -143,3 +143,34 @@ test('toolbox standard math and variable blocks compile and execute', () => {
   assert.equal(result.runtime.getScore(), 9);
 });
 
+
+
+test('compiler validates input types and supplies typed defaults for empty sockets', () => {
+  const wrongType = start(statement('rbxl_if', {}, {
+    CONDITION: { block: value('math_number', { NUM: 1 }) },
+    DO: { block: msg('should not run') }
+  }));
+  const invalid = compileBlocklyWorkspace(wrongType);
+  assert.ok(invalid.errors.some((error) => error.includes('入力型エラー: rbxl_if.CONDITION')));
+  assert.equal(invalid.events[0].body[0].condition.op, 'number');
+
+  const emptyCondition = start(statement('rbxl_if', {}, { DO: { block: msg('not run') } }));
+  const defaults = compileBlocklyWorkspace(emptyCondition);
+  assert.deepEqual(defaults.errors, []);
+  assert.deepEqual(defaults.events[0].body[0].condition, { op: 'boolean', value: false });
+});
+
+test('compiler reports unknown top-level and variable statement blocks', () => {
+  const unknownRoot = { blocks: { blocks: [statement('controls_whileUntil')] } };
+  assert.ok(compileBlocklyWorkspace(unknownRoot).errors.some((error) => error.includes('未対応のトップレベルブロック: controls_whileUntil')));
+
+  const unknownStatement = start(statement('variables_change', { VAR: { id: 'coins-id', name: 'coins' } }));
+  assert.ok(compileBlocklyWorkspace(unknownStatement).errors.some((error) => error.includes('未対応の処理ブロック: variables_change')));
+});
+
+test('compiler clamps invalid numeric fields and reports malformed numeric values', () => {
+  const workspace = start(statement('rbxl_move_part', { X: 'NaN', Y: 1e20, Z: -1e20 }));
+  const result = compileBlocklyWorkspace(workspace);
+  assert.ok(result.errors.some((error) => error.includes('数値フィールドが不正です: rbxl_move_part.X')));
+  assert.deepEqual(result.events[0].body[0].position, [0, 1e9, -1e9]);
+});
