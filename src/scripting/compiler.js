@@ -11,6 +11,11 @@ export function compileBlocklyWorkspace(workspace) {
   const errors = [];
   const variables = new Map((workspace.variables || []).map((v) => [v.id, v.name]));
   const field = (block, name, fallback = '') => block.fields?.[name] ?? fallback;
+  const variableName = (block) => {
+    const raw = field(block, 'VAR');
+    const id = raw && typeof raw === 'object' ? raw.id : raw;
+    return variables.get(id) || (raw && typeof raw === 'object' ? raw.name : '') || 'value';
+  };
   const value = (block, name, depth) => {
     const child = block.inputs?.[name]?.block;
     return child ? expression(child, depth + 1) : { op: 'number', value: 0 };
@@ -33,8 +38,8 @@ export function compileBlocklyWorkspace(workspace) {
       case 'logic_negate': return { op: 'not', value: value(block, 'BOOL', depth) };
       case 'logic_boolean': return { op: 'boolean', value: field(block, 'BOOL') === 'TRUE' };
       case 'variables_get': {
-        const id = field(block, 'VAR');
-        return { op: 'variable', name: variables.get(id) || 'score' };
+        const name = variableName(block);
+        return { op: 'variable', name: name === 'value' ? 'score' : name };
       }
       default:
         errors.push('未対応の値ブロック: ' + block.type);
@@ -73,9 +78,10 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_set_variable':
           out.push({ op: 'setVariable', name: String(field(block, 'NAME', 'value')).slice(0, 64), value: value(block, 'VALUE', depth) }); break;
         case 'rbxl_set_named_variable':
-        case 'rbxl_change_variable': {
-          const id = field(block, 'VAR');
-          out.push({ op: block.type === 'rbxl_change_variable' ? 'changeVariable' : 'setVariable', name: variables.get(id) || 'value', value: value(block, 'VALUE', depth) }); break;
+        case 'rbxl_change_variable':
+        case 'variables_set': {
+          const name = variableName(block);
+          out.push({ op: block.type === 'rbxl_change_variable' ? 'changeVariable' : 'setVariable', name, value: value(block, 'VALUE', depth) }); break;
         }
         case 'rbxl_part_visible':
           out.push({ op: 'partVisible', part: String(field(block, 'PART', '')).slice(0, 100), visible: field(block, 'VISIBLE') === true || field(block, 'VISIBLE') === 'TRUE' }); break;
