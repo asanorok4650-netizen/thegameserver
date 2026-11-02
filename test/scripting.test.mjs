@@ -365,3 +365,53 @@ test('M1-B bounds list size and string length', () => {
   assert.equal(runtime.getVariables().longText.length, 500);
   assert.ok(warnings.some((message) => message.includes('最大要素数100件')));
 });
+
+
+test('M1-C compiler creates typed IR for part getters and setters', () => {
+  const blocks = [
+    statement('rbxl_part_set_color', { PART: 'Wall' }, { VALUE: { block: value('rbxl_color', { COLOR: '#12abef' }) } }),
+    statement('rbxl_part_set_size', { PART: 'Wall', X: 8, Y: 2, Z: 4 }),
+    statement('rbxl_part_set_position', { PART: 'Wall', X: 1, Y: 2, Z: 3 }),
+    statement('rbxl_part_set_rotation', { PART: 'Wall', X: 0, Y: 90, Z: 0 }),
+    statement('rbxl_part_set_transparency', { PART: 'Wall', VALUE: 0.5 }),
+    statement('rbxl_part_set_collision', { PART: 'Wall', ENABLED: false }),
+    statement('rbxl_set_variable', { NAME: 'width' }, { VALUE: { block: value('rbxl_part_get_number', { PART: 'Wall', PROPERTY: 'sizeX' }) } }),
+    statement('rbxl_set_variable', { NAME: 'color' }, { VALUE: { block: value('rbxl_part_get_color', { PART: 'Wall' }) } }),
+    statement('rbxl_set_variable', { NAME: 'collides' }, { VALUE: { block: value('rbxl_part_get_collision', { PART: 'Wall' }) } })
+  ];
+  for (let i = 0; i < blocks.length - 1; i++) blocks[i].next = { block: blocks[i + 1] };
+  const result = compileBlocklyWorkspace(start(blocks[0]));
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.events[0].body.map((step) => step.op), [
+    'partSet', 'partSet', 'partSet', 'partSet', 'partSet', 'partSet',
+    'setVariable', 'setVariable', 'setVariable'
+  ]);
+  assert.equal(result.events[0].body[0].value.value, '#12abef');
+  assert.equal(result.events[0].body[6].value.property, 'sizeX');
+  assert.equal(result.events[0].body[7].value.property, 'color');
+  assert.equal(result.events[0].body[8].value.property, 'collide');
+});
+
+test('M1-C runtime routes part reads and writes through the adapter API', () => {
+  const properties = new Map([['Wall:sizeX', 4], ['Wall:color', '#ffffff'], ['Wall:collide', true]]);
+  const warnings = [];
+  const runtime = createBlocklyRuntime({ version: 1, events: [{ event: 'start', body: [
+    { op: 'partSet', part: 'Wall', property: 'color', value: { op: 'string', value: '#12abef' } },
+    { op: 'partSet', part: 'Wall', property: 'collide', value: { op: 'boolean', value: false } },
+    { op: 'setVariable', name: 'width', value: { op: 'partGet', part: 'Wall', property: 'sizeX' } },
+    { op: 'setVariable', name: 'color', value: { op: 'partGet', part: 'Wall', property: 'color' } },
+    { op: 'setVariable', name: 'collides', value: { op: 'partGet', part: 'Wall', property: 'collide' } }
+  ] }] }, {
+    onWarning: (message) => warnings.push(message),
+    setPartProperty: (part, property, value) => { properties.set(part + ':' + property, value); return true; },
+    getPartProperty: (part, property) => properties.get(part + ':' + property) ?? null
+  });
+  runtime.start();
+  for (let i = 0; i < 12; i++) runtime.update(0.016);
+  assert.equal(properties.get('Wall:color'), '#12abef');
+  assert.equal(properties.get('Wall:collide'), false);
+  assert.equal(runtime.getVariables().width, 4);
+  assert.equal(runtime.getVariables().color, '#12abef');
+  assert.equal(runtime.getVariables().collides, false);
+  assert.deepEqual(warnings, []);
+});
