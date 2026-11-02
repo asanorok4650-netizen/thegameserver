@@ -5,7 +5,7 @@ const MAX_STEPS_PER_TICK = 200;
 const MAX_WORK_PER_TICK = 4000; // 1フレームで進められる「ブロック実行 + 繰り返し1周」の合計。空の入れ子ループでも画面が固まらない
 const MAX_REPEAT = 100;
 
-export function createBlocklyRuntime(program, api = {}) {
+export function createScriptingRuntime(program, api = {}) {
   const variables = new Map([['score', 0], ...((program?.variables || []).map((v) => [v.name, clamp(Number(v.initial) || 0)]))]);
   const tasks = [];
   const intervals = new Map();
@@ -108,3 +108,6 @@ export function createBlocklyRuntime(program, api = {}) {
     stop() { stopped = true; tasks.length = 0; }
   };
 }
+
+// Backward-compatible name used by earlier Phase 3 tests and integrations.
+export const createBlocklyRuntime = createScriptingRuntime;
