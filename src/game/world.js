@@ -148,7 +148,7 @@ export function buildSceneFromWorld(worldJson) {
     const record = findRecord(key);
     if (!record) return false;
     const nextVisible = !!visible;
-    if (record.visible !== nextVisible && record.item) {
+    if (record.visible !== nextVisible && record.item && record.collide) {
       if (nextVisible) collision.add(record.item); else collision.remove(record.item);
     }
     record.visible = nextVisible;
@@ -184,14 +184,14 @@ export function buildSceneFromWorld(worldJson) {
     }
     if (property === 'size') {
       if (!finiteVector || value.some((v) => v < 0.1 || v > 1000)) return false;
-      if (record.collide && record.item) collision.remove(record.item);
+      if (record.collide && record.visible && record.item) collision.remove(record.item);
       record.size = value.slice();
       record.trigger.size = value.slice(); record.trigger.half = value.map((v) => v / 2);
       if (record.item) {
         record.item.half = value.map((v) => v / 2);
         if (record.item.type === 'ball') record.item.radius = Math.max(...value) / 2;
         if (record.item.type === 'convex') record.item.planes = record.shape === 'wedge' ? wedgePlanes(value) : cornerPlanes(value);
-        if (record.collide) collision.add(record.item);
+        if (record.collide && record.visible) collision.add(record.item);
       }
       if (record.entry) record.entry.size = value.slice();
       applyPartMatrix(record);
@@ -201,7 +201,7 @@ export function buildSceneFromWorld(worldJson) {
       if (!finiteVector || value.some((v) => Math.abs(v) > 100000)) return false;
       record.pos = value.slice(); record.trigger.pos = record.pos.slice();
       if (record.entry) { record.entry.base.pos = record.pos.slice(); record.entry.pose.pos = record.pos.slice(); }
-      if (record.item && record.collide) collision.moveItem(record.item, record.pos, record.rot);
+      if (record.item && record.collide && record.visible) collision.moveItem(record.item, record.pos, record.rot);
       applyPartMatrix(record);
       return true;
     }
@@ -229,7 +229,7 @@ export function buildSceneFromWorld(worldJson) {
     if (property === 'collide') {
       const next = !!value;
       if (record.collide !== next && record.item) {
-        if (next) collision.add(record.item); else collision.remove(record.item);
+        if (next && record.visible) collision.add(record.item); else collision.remove(record.item);
       }
       record.collide = next;
       return true;
