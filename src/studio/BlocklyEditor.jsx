@@ -62,7 +62,7 @@ const toolbox = {
       block('logic_compare'), block('logic_operation'), block('logic_negate'), block('logic_boolean')
     ] },
     { kind: 'category', name: '標準ブロック', colour: '#8793a5', contents: [
-      block('controls_if'), block('controls_repeat_ext'), block('controls_whileUntil'),
+      block('controls_if'), block('controls_repeat_ext'),
       block('math_single'), block('math_modulo')
     ] }
   ]
