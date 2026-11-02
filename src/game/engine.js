@@ -35,6 +35,8 @@ export class Game {
 
     this.p = new THREE.Vector3();
     this.vel = new THREE.Vector3();
+    // M1-D: 現行は単一ローカルプレイヤー。APIはIDを必須にし、将来の複数プレイヤー管理へ拡張する。
+    this.playerStats = { health: 100, maxHealth: 100, alive: true, walkSpeed: null, jumpPower: null };
     this.yaw = 0; this.pitch = 0.35; this.dist = 14;
     this.heading = 0;
     this.grounded = false;
@@ -145,7 +147,7 @@ export class Game {
       onMessage: handlers.onMessage,
       onWarning: handlers.onWarning,
       setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; },
-      teleportToPart: (key) => { const p = atPart(key); if (p) { this.p.set(...p); this.vel.set(0,0,0); } },
+      teleportToPart: (key, player = 'local') => { const p = atPart(key); if (player === 'local' && p) { this.p.set(...p); this.vel.set(0,0,0); this.grounded = false; } },
       checkpointAtPart: (key) => { const p = atPart(key); if (p) this.spawn = p; },
       respawn: () => this.respawn(),
       complete: () => {
@@ -155,7 +157,11 @@ export class Game {
       setPartVisible: (key, visible) => { if (!this.world?.setPartVisible?.(key, visible)) handlers.onWarning?.('表示を変更するパーツが見つかりません: ' + key); },
       movePart: (key, position) => { if (!this.world?.movePart?.(key, position)) handlers.onWarning?.('移動するパーツが見つからないか、座標が不正です: ' + key); },
       setPartProperty: (key, property, value) => this.world?.setPartProperty?.(key, property, value) ?? false,
-      getPartProperty: (key, property) => this.world?.getPartProperty?.(key, property) ?? null
+      getPartProperty: (key, property) => this.world?.getPartProperty?.(key, property) ?? null,
+      getPlayerProperty: (player, property) => this.getPlayerProperty(player, property),
+      setPlayerProperty: (player, property, value) => this.setPlayerProperty(player, property, value),
+      damagePlayer: (player, amount) => this.damagePlayer(player, amount),
+      healPlayer: (player, amount) => this.healPlayer(player, amount)
     });
     this.scriptRuntime.start();
   }
@@ -184,13 +190,63 @@ export class Game {
     this.avatar = built;
   }
 
-  respawn() {
+  getPlayerProperty(player, property) {
+    if (player !== 'local') return null;
+    const values = {
+      health: this.playerStats.health, maxHealth: this.playerStats.maxHealth, alive: this.playerStats.alive,
+      positionX: this.p.x, positionY: this.p.y, positionZ: this.p.z,
+      walkSpeed: this.playerStats.walkSpeed ?? this.rules.walkSpeed,
+      jumpPower: this.playerStats.jumpPower ?? this.rules.jumpPower
+    };
+    return Object.hasOwn(values, property) ? values[property] : null;
+  }
+
+  setPlayerProperty(player, property, value) {
+    if (player !== 'local' || typeof value !== 'number' || !Number.isFinite(value)) return false;
+    if (property === 'health') {
+      this.playerStats.health = Math.max(0, Math.min(this.playerStats.maxHealth, value));
+      this.playerStats.alive = this.playerStats.health > 0;
+      if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; }
+      return true;
+    }
+    if (property === 'walkSpeed') { this.playerStats.walkSpeed = Math.max(0, Math.min(200, value)); return true; }
+    if (property === 'jumpPower') { this.playerStats.jumpPower = Math.max(0, Math.min(200, value)); return true; }
+    return false;
+  }
+
+  setPlayerPosition(player, position) {
+    if (player !== 'local' || !Array.isArray(position) || position.length !== 3 || !position.every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 100000)) return false;
+    this.p.set(position[0], position[1], position[2]);
+    this.vel.set(0, 0, 0);
+    this.grounded = false;
+    return true;
+  }
+
+  damagePlayer(player, amount) {
+    if (player !== 'local' || !this.playerStats.alive || !Number.isFinite(amount)) return false;
+    this.playerStats.health = Math.max(0, this.playerStats.health - Math.max(0, amount));
+    this.playerStats.alive = this.playerStats.health > 0;
+    if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; }
+    return true;
+  }
+
+  healPlayer(player, amount) {
+    if (player !== 'local' || !this.playerStats.alive || !Number.isFinite(amount)) return false;
+    this.playerStats.health = Math.min(this.playerStats.maxHealth, this.playerStats.health + Math.max(0, amount));
+    return true;
+  }
+
+  respawn(player = 'local') {
+    if (player !== 'local') return false;
+    this.playerStats.health = this.playerStats.maxHealth;
+    this.playerStats.alive = true;
     this.p.set(this.spawn[0], this.spawn[1], this.spawn[2]);
     this.vel.set(0, 0, 0);
     this.grounded = false;
     this.activeTriggers.clear();
     this.activeRuleTriggers.clear();
     this.scriptRuntime?.onSpawn();
+    return true;
   }
 
   restart() {
@@ -253,6 +309,12 @@ export class Game {
     dt = Math.min(dt, 0.05);
     if (this.completed) return;
     this.time += dt;
+    if (!this.playerStats.alive) {
+      this.vel.set(0, 0, 0);
+      this.logicRuntime?.update?.({ position: this.p, dt });
+      this.scriptRuntime?.update?.(dt);
+      return;
+    }
     // 動くパーツを先に進め、乗っているプレイヤーも一緒に運ぶ(衝突解決の前)
     if (this.world?.dynamics?.size) {
       const dyaw = this.world.dynamics.step(this.time, this.floor, this.p);
@@ -265,7 +327,9 @@ export class Game {
     if (len < 0.15) { mx = 0; my = 0; } else if (len > 1) { mx /= len; my /= len; }
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     const wx = -sy * my + cy * mx, wz = -cy * my - sy * mx;
-    const { walkSpeed, jumpPower, gravity } = this.rules;
+    const { gravity } = this.rules;
+    const walkSpeed = this.playerStats.walkSpeed ?? this.rules.walkSpeed;
+    const jumpPower = this.playerStats.jumpPower ?? this.rules.jumpPower;
     this.vel.x = wx * walkSpeed; this.vel.z = wz * walkSpeed;
     const floor = this.grounded ? this.floor : null;
     if (floor?.effect?.type === 'conveyor') { // 足場の向き(X方向)へ運ぶ。回る床でも今の向きに追従する
