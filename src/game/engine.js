@@ -45,9 +45,9 @@ export class Game {
     this.jumpHeld = false;
     this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.initialSpawn = this.spawn.slice();
     this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
-    this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.ruleTriggerParts = []; this.activeRuleTriggers = new Set();
+    this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.activeRuleTriggers = new Set();
     this.scriptingWorkspace = null; this.scriptRuntime = null; this.scriptHandlers = {};
-    this.activeTriggers = new Set(); this.activeScriptTriggers = new Set(); this.completed = false;
+    this.activeTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
     this.minY = -500;
@@ -129,8 +129,6 @@ export class Game {
   }
 
   _createUnifiedRuntime() {
-    this.ruleRuntime = null; // 旧ランタイムは共通IRへ移行
-    this.ruleTriggerParts = [];
     const program = createProgramIR({ workspace: this.scriptingWorkspace, eventRules: this.eventRulesConfig });
     const handlers = { ...this.eventRuleHandlers, ...this.scriptHandlers };
     if (program.errors?.length) handlers.onWarning?.('スクリプトのコンパイル警告: ' + program.errors.join(' / '));
@@ -190,7 +188,6 @@ export class Game {
     this.grounded = false;
     this.activeTriggers.clear();
     this.activeRuleTriggers.clear();
-    this.activeScriptTriggers.clear();
     this.scriptRuntime?.onSpawn();
   }
 
