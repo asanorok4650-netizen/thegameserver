@@ -7,14 +7,14 @@ const MAX_NUMBER = 1e9;
 
 const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
-  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_part_get_number'
+  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_part_get_number', 'rbxl_player_get_number'
 ]);
 const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join']);
 const COLOR_BLOCKS = new Set(['rbxl_color', 'rbxl_part_get_color']);
 const LIST_BLOCKS = new Set(['rbxl_list_create']);
 const BOOLEAN_BLOCKS = new Set([
   'rbxl_compare', 'logic_compare', 'logic_operation',
-  'logic_negate', 'logic_boolean', 'rbxl_part_get_collision'
+  'logic_negate', 'logic_boolean', 'rbxl_part_get_collision', 'rbxl_player_is_alive'
 ]);
 
 export function compileBlocklyWorkspace(workspace) {
@@ -88,6 +88,8 @@ export function compileBlocklyWorkspace(workspace) {
       case 'rbxl_part_get_color': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'color' };
       case 'rbxl_part_get_number': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: String(field(block, 'PROPERTY', 'positionX')) };
       case 'rbxl_part_get_collision': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'collide' };
+      case 'rbxl_player_get_number': return { op: 'playerGet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: String(field(block, 'PROPERTY', 'health')) };
+      case 'rbxl_player_is_alive': return { op: 'playerGet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'alive' };
       case 'rbxl_text_join': return { op: 'concat', a: value(block, 'A', depth, 'String'), b: value(block, 'B', depth, 'String') };
       case 'rbxl_random': return { op: 'random', min: value(block, 'MIN', depth), max: value(block, 'MAX', depth) };
       case 'rbxl_elapsed_time': return { op: 'elapsed' };
@@ -180,6 +182,12 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_move_part':
           out.push({ op: 'movePart', part: String(field(block, 'PART', '')).slice(0, 100), position: ['X','Y','Z'].map((k) => numericField(block, k)) }); break;
         case 'rbxl_part_set_color': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'color', value: value(block, 'VALUE', depth, 'Colour') }); break;
+        case 'rbxl_player_set_health': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'health', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_player_set_walk_speed': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'walkSpeed', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_player_set_jump_power': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'jumpPower', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_player_set_position': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'position', value: { op: 'vector', values: ['X','Y','Z'].map((k) => ({ op: 'number', value: numericField(block, k) })) } }); break;
+        case 'rbxl_player_damage': out.push({ op: 'playerDamage', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_player_heal': out.push({ op: 'playerHeal', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: { op: 'number', value: numericField(block, 'VALUE') } }); break;
         case 'rbxl_part_set_size':
         case 'rbxl_part_set_position':
         case 'rbxl_part_set_rotation': {
@@ -189,8 +197,8 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_part_set_transparency': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'transparency', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
         case 'rbxl_part_set_collision': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'collide', value: { op: 'boolean', value: field(block, 'ENABLED') === true || field(block, 'ENABLED') === 'TRUE' } }); break;
         case 'rbxl_set_checkpoint': out.push({ op: 'checkpoint' }); break;
-        case 'rbxl_teleport': out.push({ op: 'teleportToPart', part: String(field(block, 'PART', '')).slice(0, 100) }); break;
-        case 'rbxl_respawn': out.push({ op: 'respawn' }); break;
+        case 'rbxl_teleport': out.push({ op: 'teleportToPart', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), part: String(field(block, 'PART', '')).slice(0, 100) }); break;
+        case 'rbxl_respawn': out.push({ op: 'respawn', player: String(field(block, 'PLAYER', 'local')).slice(0, 100) }); break;
         case 'rbxl_complete': out.push({ op: 'complete' }); break;
         default:
           report('未対応の処理ブロック: ' + String(block.type));
