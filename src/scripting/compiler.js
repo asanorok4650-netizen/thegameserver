@@ -56,10 +56,11 @@ export function compileBlocklyWorkspace(workspace) {
       if (expected === 'Boolean') return { op: 'boolean', value: false };
       if (expected === 'String') return { op: 'string', value: '' };
       if (expected === 'Array') return { op: 'list', items: [] };
+      if (expected === 'Any') return { op: 'string', value: '' };
       return { op: 'number', value: 0 };
     }
     const actual = expressionType(child);
-    if (actual !== 'Unknown' && actual !== expected) {
+    if (expected !== 'Any' && actual !== 'Unknown' && actual !== expected) {
       report(`入力型エラー: ${block.type}.${name} は ${expected} が必要ですが ${actual} が接続されています`);
     }
     return expression(child, depth + 1);
