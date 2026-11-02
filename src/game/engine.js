@@ -217,6 +217,7 @@ export class Game {
     if ((!this.logicRuntime && !this.scriptRuntime) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
     const now = new Set();
     for (const trigger of this.world.triggers) {
+      if (trigger.enabled === false) continue;
       let touching = false;
       for (const y of this.sy) {
         if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) {
