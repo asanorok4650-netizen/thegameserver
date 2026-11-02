@@ -32,6 +32,13 @@ export function createScriptingRuntime(program, api = {}) {
     if (node.op === 'number') { const n = Number(node.value); return Number.isFinite(n) ? clamp(n) : 0; }
     if (node.op === 'boolean') return !!node.value;
     if (node.op === 'string') return String(node.value ?? '').slice(0, MAX_STRING_LENGTH);
+    if (node.op === 'vector') return (node.values || []).slice(0, 3).map((item) => clamp(Number(read(item))));
+    if (node.op === 'partGet') {
+      if (typeof api.getPartProperty !== 'function') { warnOnce('パーツ情報の取得APIが利用できません'); return 0; }
+      const result = api.getPartProperty(node.part, node.property);
+      if (result === null || result === undefined) { warnOnce('パーツ情報を取得できません: ' + String(node.part).slice(0, 100)); return node.property === 'collide' ? false : node.property === 'color' ? '#ffffff' : 0; }
+      return cloneValue(result);
+    }
     if (node.op === 'variable') return cloneValue(variables.get(node.name) ?? 0);
     if (node.op === 'concat') return (String(read(node.a) ?? '') + String(read(node.b) ?? '')).slice(0, MAX_STRING_LENGTH);
     if (node.op === 'list') return (node.items || []).slice(0, MAX_LIST_ITEMS).map((item) => cloneValue(read(item)));
@@ -106,6 +113,12 @@ export function createScriptingRuntime(program, api = {}) {
         }
         case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
+        case 'partSet':
+          if (typeof api.setPartProperty === 'function') {
+            const accepted = api.setPartProperty(step.part, step.property, read(step.value));
+            if (!accepted) warnOnce('パーツのプロパティを変更できません: ' + String(step.part).slice(0, 100) + ' (' + String(step.property).slice(0, 40) + ')');
+          } else warnOnce('パーツのプロパティ設定APIが利用できません');
+          yield 0; break;
         case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
         case 'teleportToPart': api.teleportToPart?.(step.part); yield 0; break;
         case 'checkpointAtPart': api.checkpointAtPart?.(step.part); yield 0; break;
