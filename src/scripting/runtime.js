@@ -11,10 +11,12 @@ export function createScriptingRuntime(program, api = {}) {
   const intervals = new Map();
   let score = 0, elapsed = 0, stopped = false;
   let work = MAX_WORK_PER_TICK;
+  const warned = new Set();
+  const warnOnce = (message) => { if (!warned.has(message)) { warned.add(message); api.onWarning?.(message); } };
   const read = (node) => {
     if (typeof node === 'number') return Number.isFinite(node) ? node : 0;
     if (!node || typeof node !== 'object') return 0;
-    if (node.op === 'number') return Number(node.value) || 0;
+    if (node.op === 'number') { const n = Number(node.value); return Number.isFinite(n) ? clamp(n) : 0; }
     if (node.op === 'boolean') return !!node.value;
     if (node.op === 'variable') return variables.get(node.name) ?? 0;
     if (node.op === 'not') return !read(node.value);
@@ -32,6 +34,7 @@ export function createScriptingRuntime(program, api = {}) {
       const a = Number(read(node.a)) || 0, b = Number(read(node.b)) || 0;
       switch (node.operator) { case 'sub': return clamp(a-b); case 'mul': return clamp(a*b); case 'div': return b ? clamp(a/b) : 0; case 'mod': return b ? clamp(a%b) : 0; case 'pow': return clamp(Math.pow(a, Math.max(-16, Math.min(16,b)))); default: return clamp(a+b); }
     }
+    warnOnce('未対応の値命令をスキップしました: ' + String(node.op || 'unknown').slice(0, 80));
     return 0;
   };
   function* runSteps(steps, depth = 0) {
@@ -70,7 +73,7 @@ export function createScriptingRuntime(program, api = {}) {
         case 'checkpointAtPart': api.checkpointAtPart?.(step.part); yield 0; break;
         case 'respawn': api.respawn?.(); yield 0; break;
         case 'complete': stopped = true; api.complete?.(); return;
-        default: yield 0;
+        default: warnOnce('未対応の処理命令をスキップしました: ' + String(step.op || 'unknown').slice(0, 80)); yield 0;
       }
     }
   }
@@ -106,7 +109,7 @@ export function createScriptingRuntime(program, api = {}) {
       }
       if (tasks.length > MAX_TASKS) tasks.length = MAX_TASKS;
     },
-    reset() { tasks.length = 0; intervals.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, clamp(Number(v.initial) || 0)); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
+    reset() { tasks.length = 0; intervals.clear(); warned.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, clamp(Number(v.initial) || 0)); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
     getScore: () => score,
     getVariables: () => Object.fromEntries(variables),
     stop() { stopped = true; tasks.length = 0; }
