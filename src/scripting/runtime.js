@@ -4,12 +4,25 @@ const MAX_TASKS = 64;
 const MAX_STEPS_PER_TICK = 200;
 const MAX_WORK_PER_TICK = 4000; // 1フレームで進められる「ブロック実行 + 繰り返し1周」の合計。空の入れ子ループでも画面が固まらない
 const MAX_REPEAT = 100;
+const MAX_LIST_ITEMS = 100;
+const MAX_VALUE_DEPTH = 8;
+const MAX_STRING_LENGTH = 500;
+const cloneValue = (value, depth = 0) => {
+  if (depth > MAX_VALUE_DEPTH) return '';
+  if (typeof value === 'string') return value.slice(0, MAX_STRING_LENGTH);
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return clamp(value);
+  if (Array.isArray(value)) return value.slice(0, MAX_LIST_ITEMS).map((item) => cloneValue(item, depth + 1));
+  return '';
+};
 
 export function createScriptingRuntime(program, api = {}) {
-  const variables = new Map([['score', 0], ...((program?.variables || []).map((v) => [v.name, clamp(Number(v.initial) || 0)]))]);
+  const variables = new Map([['score', 0], ...((program?.variables || []).map((v) => [v.name, cloneValue(v.initial)]))]);
   const tasks = [];
   const intervals = new Map();
   let score = 0, elapsed = 0, stopped = false;
+  let randomState = (Number(program?.randomSeed ?? api.randomSeed ?? 0x6d2b79f5) >>> 0) || 0x6d2b79f5;
+  const random = () => { randomState ^= randomState << 13; randomState ^= randomState >>> 17; randomState ^= randomState << 5; return (randomState >>> 0) / 0x100000000; };
   let work = MAX_WORK_PER_TICK;
   const warned = new Set();
   const warnOnce = (message) => { if (!warned.has(message)) { warned.add(message); api.onWarning?.(message); } };
@@ -18,7 +31,18 @@ export function createScriptingRuntime(program, api = {}) {
     if (!node || typeof node !== 'object') return 0;
     if (node.op === 'number') { const n = Number(node.value); return Number.isFinite(n) ? clamp(n) : 0; }
     if (node.op === 'boolean') return !!node.value;
-    if (node.op === 'variable') return variables.get(node.name) ?? 0;
+    if (node.op === 'string') return String(node.value ?? '').slice(0, MAX_STRING_LENGTH);
+    if (node.op === 'variable') return cloneValue(variables.get(node.name) ?? 0);
+    if (node.op === 'concat') return (String(read(node.a) ?? '') + String(read(node.b) ?? '')).slice(0, MAX_STRING_LENGTH);
+    if (node.op === 'list') return (node.items || []).slice(0, MAX_LIST_ITEMS).map((item) => cloneValue(read(item)));
+    if (node.op === 'listLength') { const list = read(node.list); return Array.isArray(list) ? list.length : 0; }
+    if (node.op === 'listGet') { const list = read(node.list); const index = Math.floor(Number(read(node.index)) || 0) - 1; return Array.isArray(list) && index >= 0 && index < list.length ? cloneValue(list[index]) : ''; }
+    if (node.op === 'elapsed') return elapsed;
+    if (node.op === 'random') {
+      const min = Number(read(node.min)) || 0, max = Number(read(node.max)) || 0;
+      const low = Math.min(min, max), high = Math.max(min, max);
+      return Number.isInteger(low) && Number.isInteger(high) ? Math.floor(random() * (high - low + 1)) + low : low + random() * (high - low);
+    }
     if (node.op === 'not') return !read(node.value);
     if (node.op === 'and') return !!read(node.a) && !!read(node.b);
     if (node.op === 'or') return !!read(node.a) || !!read(node.b);
@@ -63,9 +87,23 @@ export function createScriptingRuntime(program, api = {}) {
           const amount = clamp(read(step.amount)); score = clamp(score + amount);
           variables.set('score', score); api.onScore?.(score, amount); yield 0; break;
         }
-        case 'setVariable': variables.set(step.name, clamp(read(step.value))); yield 0; break;
+        case 'setVariable': variables.set(step.name, cloneValue(read(step.value))); yield 0; break;
         case 'changeVariable': variables.set(step.name, clamp((variables.get(step.name)||0) + read(step.value))); yield 0; break;
         case 'message': api.onMessage?.(String(step.text || '').replace(/\{([\wぁ-んァ-ヶ一-龠]+)\}/g, (_, n) => String(variables.get(n) ?? 0))); yield 0; break;
+        case 'listAdd': {
+          let list = variables.get(step.name);
+          if (!Array.isArray(list)) { warnOnce('リスト変数ではないため新しいリストを作成しました: ' + step.name); list = []; }
+          if (list.length < MAX_LIST_ITEMS) list.push(cloneValue(read(step.value)));
+          else warnOnce('リストの最大要素数100件に達しました: ' + step.name);
+          variables.set(step.name, list); yield 0; break;
+        }
+        case 'listReplace': {
+          const list = variables.get(step.name);
+          const index = Math.floor(Number(read(step.index)) || 0) - 1;
+          if (!Array.isArray(list) || index < 0 || index >= list.length) warnOnce('リストの置換位置が範囲外です: ' + step.name);
+          else list[index] = cloneValue(read(step.value));
+          yield 0; break;
+        }
         case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
@@ -109,9 +147,9 @@ export function createScriptingRuntime(program, api = {}) {
       }
       if (tasks.length > MAX_TASKS) tasks.length = MAX_TASKS;
     },
-    reset() { tasks.length = 0; intervals.clear(); warned.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, clamp(Number(v.initial) || 0)); score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
+    reset() { tasks.length = 0; intervals.clear(); warned.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, cloneValue(v.initial)); randomState = (Number(program?.randomSeed ?? api.randomSeed ?? 0x6d2b79f5) >>> 0) || 0x6d2b79f5; score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
     getScore: () => score,
-    getVariables: () => Object.fromEntries(variables),
+    getVariables: () => Object.fromEntries([...variables].map(([name, value]) => [name, cloneValue(value)])),
     stop() { stopped = true; tasks.length = 0; }
   };
 }
