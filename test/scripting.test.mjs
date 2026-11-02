@@ -115,27 +115,28 @@ test('unsupported statement and value blocks produce explicit compiler errors', 
 });
 
 test('toolbox standard math and variable blocks compile and execute', () => {
-  const math = statement('rbxl_add_score', {}, {
-    VALUE: { block: statement('math_modulo', {}, {
-      DIVIDEND: { block: value('math_number', { NUM: 9 }) },
-      DIVISOR: { block: value('math_number', { NUM: 4 }) }
-    }) }
-  });
+  // 末尾から順につなぐ: coins=3 → +coins(3) → +(9 mod 4 = 1) → +|-5|(5) = 合計9
   const abs = statement('rbxl_add_score', {}, {
     VALUE: { block: statement('math_single', { OP: 'ABS' }, {
       NUM: { block: value('math_number', { NUM: -5 }) }
     }) }
   });
+  const math = statement('rbxl_add_score', {}, {
+    VALUE: { block: statement('math_modulo', {}, {
+      DIVIDEND: { block: value('math_number', { NUM: 9 }) },
+      DIVISOR: { block: value('math_number', { NUM: 4 }) }
+    }) }
+  }, abs);
+  const addCoins = statement('rbxl_add_score', {}, {
+    VALUE: { block: value('variables_get', { VAR: { id: 'coins-id', name: 'coins' } }) }
+  }, math);
+  const setCoins = statement('variables_set', { VAR: { id: 'coins-id', name: 'coins' } }, {
+    VALUE: { block: value('math_number', { NUM: 3 }) }
+  }, addCoins);
   const workspace = {
     variables: [{ id: 'coins-id', name: 'coins' }],
-    blocks: { blocks: [start(statement('variables_set', { VAR: { id: 'coins-id', name: 'coins' } }, {
-      VALUE: { block: value('math_number', { NUM: 3 }) }
-    }, statement('rbxl_add_score', {}, {
-      VALUE: { block: value('variables_get', { VAR: { id: 'coins-id', name: 'coins' } }) }
-    }))).blocks.blocks[0]] }
+    blocks: { blocks: [statement('rbxl_when_start', {}, {}, setCoins)] }
   };
-  workspace.blocks.blocks[0].next.block.next = { block: math };
-  math.next = { block: abs };
 
   const result = run(workspace);
   assert.deepEqual(result.program.errors, []);
@@ -199,10 +200,13 @@ test('runtime warns once for unknown instructions and sanitizes non-finite numbe
 
 test('all toolbox value block families compile without errors', () => {
   const number = (n) => ({ block: value('math_number', { NUM: n }) });
-  const score = (expression) => statement('rbxl_add_score', {}, { VALUE: { block: expression } });
-  const expressions = [
+  // 数値ブロックは数値ソケット(rbxl_add_score)へ、真偽値ブロックは真偽値ソケット(rbxl_if の条件)へつなぐ。
+  // 型が違う接続はM1-Aの型チェックでエラーになるのが正しい挙動。
+  const numberExpressions = [
     statement('rbxl_number', { VALUE: 2 }),
-    statement('math_arithmetic', { OP: 'MULTIPLY' }, { A: number(3), B: number(4) }),
+    statement('math_arithmetic', { OP: 'MULTIPLY' }, { A: number(3), B: number(4) })
+  ];
+  const booleanExpressions = [
     statement('logic_compare', { OP: 'GTE' }, { A: number(4), B: number(2) }),
     statement('logic_operation', { OP: 'AND' }, {
       A: { block: value('logic_boolean', { BOOL: 'TRUE' }) },
@@ -210,16 +214,14 @@ test('all toolbox value block families compile without errors', () => {
     }),
     statement('rbxl_compare', { OP: 'NEQ' }, { A: number(1), B: number(2) })
   ];
-  let first = score(expressions[0]);
-  let tail = first;
-  for (const expression of expressions.slice(1)) {
-    const next = score(expression);
-    tail.next = { block: next };
-    tail = next;
-  }
-  const result = compileBlocklyWorkspace(start(first));
+  const steps = [
+    ...numberExpressions.map((expression) => statement('rbxl_add_score', {}, { VALUE: { block: expression } })),
+    ...booleanExpressions.map((expression) => statement('rbxl_if', {}, { CONDITION: { block: expression } }))
+  ];
+  for (let i = 0; i < steps.length - 1; i++) steps[i].next = { block: steps[i + 1] };
+  const result = compileBlocklyWorkspace(start(steps[0]));
   assert.deepEqual(result.errors, []);
-  assert.equal(result.events[0].body.length, expressions.length);
+  assert.equal(result.events[0].body.length, steps.length);
 });
 
 

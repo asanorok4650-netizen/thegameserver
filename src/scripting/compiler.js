@@ -7,7 +7,7 @@ const MAX_NUMBER = 1e9;
 
 const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
-  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_part_get_number', 'rbxl_player_get_number'
+  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_event_elapsed_time', 'rbxl_part_get_number', 'rbxl_player_get_number'
 ]);
 const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join', 'rbxl_event_player_id', 'rbxl_event_part_id', 'rbxl_event_part_name', 'rbxl_event_type']);
 const COLOR_BLOCKS = new Set(['rbxl_color', 'rbxl_part_get_color']);
@@ -97,6 +97,7 @@ export function compileBlocklyWorkspace(workspace) {
       case 'rbxl_text_join': return { op: 'concat', a: value(block, 'A', depth, 'String'), b: value(block, 'B', depth, 'String') };
       case 'rbxl_random': return { op: 'random', min: value(block, 'MIN', depth), max: value(block, 'MAX', depth) };
       case 'rbxl_elapsed_time': return { op: 'elapsed' };
+      case 'rbxl_event_elapsed_time': return { op: 'eventElapsed' };
       case 'rbxl_list_create': return { op: 'list', items: ['ADD0', 'ADD1', 'ADD2'].filter((key) => block.inputs?.[key]?.block).map((key) => value(block, key, depth, 'Any')) };
       case 'rbxl_list_length': return { op: 'listLength', list: value(block, 'LIST', depth, 'Array') };
       case 'rbxl_list_get': return { op: 'listGet', list: value(block, 'LIST', depth, 'Array'), index: value(block, 'INDEX', depth) };

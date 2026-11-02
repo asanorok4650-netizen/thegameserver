@@ -52,6 +52,8 @@ export function createScriptingRuntime(program, api = {}) {
     if (node.op === 'listLength') { const list = read(node.list, context); return Array.isArray(list) ? list.length : 0; }
     if (node.op === 'listGet') { const list = read(node.list, context); const index = Math.floor(Number(read(node.index, context)) || 0) - 1; return Array.isArray(list) && index >= 0 && index < list.length ? cloneValue(list[index]) : ''; }
     if (node.op === 'elapsed') return elapsed;
+    // イベント起動時刻をタスクのコンテキストに固定しているので、他のイベントの経過時間とは混ざらない。
+    if (node.op === 'eventElapsed') return Number.isFinite(context?.startedAt) ? Math.max(0, elapsed - context.startedAt) : 0;
     if (node.op === 'random') {
       const min = Number(read(node.min, context)) || 0, max = Number(read(node.max, context)) || 0;
       const low = Math.min(min, max), high = Math.max(min, max);
@@ -154,7 +156,7 @@ export function createScriptingRuntime(program, api = {}) {
     if (stopped || tasks.length >= MAX_TASKS) return;
     for (const item of program?.events || []) {
       if (item.event !== event || (['touch', 'leave'].includes(event) && item.target && item.target !== target && item.target !== alias)) continue;
-      tasks.push({ iterator: runSteps(item.body, 0, { eventType: event, playerId: details.playerId || '', partId: details.partId || target || '', partName: details.partName || alias || '' }), wake: elapsed });
+      tasks.push({ iterator: runSteps(item.body, 0, { eventType: event, playerId: details.playerId || '', partId: details.partId || target || '', partName: details.partName || alias || '', startedAt: elapsed }), wake: elapsed });
     }
   };
   return {
@@ -167,7 +169,7 @@ export function createScriptingRuntime(program, api = {}) {
       elapsed += Math.max(0, Math.min(0.1, dt || 0));
       for (const item of program?.events || []) if (item.event === 'interval') {
         const next = (intervals.get(item) || 0) + Math.max(0, Math.min(0.1, dt || 0));
-        if (next >= item.seconds) { intervals.set(item, next % item.seconds); if (tasks.length < MAX_TASKS) tasks.push({ iterator: runSteps(item.body, 0, { eventType: 'interval', playerId: '', partId: '', partName: '' }), wake: elapsed }); }
+        if (next >= item.seconds) { intervals.set(item, next % item.seconds); if (tasks.length < MAX_TASKS) tasks.push({ iterator: runSteps(item.body, 0, { eventType: 'interval', playerId: '', partId: '', partName: '', startedAt: elapsed }), wake: elapsed }); }
         else intervals.set(item, next);
       }
       work = MAX_WORK_PER_TICK;

@@ -62,6 +62,7 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_text_join', message0: '文字列 %1 と %2 をつなげる', args0: [{ type: 'input_value', name: 'A', check: 'String' }, { type: 'input_value', name: 'B', check: 'String' }], output: 'String', colour: 190 },
     { type: 'rbxl_random', message0: '%1 から %2 までの乱数', args0: [{ type: 'input_value', name: 'MIN', check: 'Number' }, { type: 'input_value', name: 'MAX', check: 'Number' }], output: 'Number', colour: 210 },
     { type: 'rbxl_elapsed_time', message0: 'ゲーム開始からの経過秒数', output: 'Number', colour: 210 },
+    { type: 'rbxl_event_elapsed_time', message0: 'このイベントが始まってからの経過秒数', output: 'Number', colour: 210 },
     { type: 'rbxl_list_create', message0: 'リストを作る %1 %2 %3', args0: [{ type: 'input_value', name: 'ADD0' }, { type: 'input_value', name: 'ADD1' }, { type: 'input_value', name: 'ADD2' }], output: 'Array', colour: 285 },
     { type: 'rbxl_list_length', message0: 'リスト %1 の長さ', args0: [{ type: 'input_value', name: 'LIST', check: 'Array' }], output: 'Number', colour: 285 },
     { type: 'rbxl_list_get', message0: 'リスト %1 の %2 番目', args0: [{ type: 'input_value', name: 'LIST', check: 'Array' }, { type: 'input_value', name: 'INDEX', check: 'Number' }], output: null, colour: 285 },
@@ -101,7 +102,7 @@ const toolbox = {
       block('rbxl_list_length'), block('rbxl_list_get'), block('rbxl_list_add'), block('rbxl_list_replace')
     ] },
     { kind: 'category', name: '計算・条件', colour: '#5796d2', contents: [
-      block('rbxl_random'), block('rbxl_elapsed_time'),
+      block('rbxl_random'), block('rbxl_elapsed_time'), block('rbxl_event_elapsed_time'),
       block('rbxl_number'), block('rbxl_compare'), block('math_number'), block('math_arithmetic'),
       block('logic_compare'), block('logic_operation'), block('logic_negate'), block('logic_boolean')
     ] },

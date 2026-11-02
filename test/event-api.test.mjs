@@ -49,3 +49,35 @@ test('M1-E event context is empty for fields not supplied by the event', () => {
   runtime.update(0.016);
   assert.equal(runtime.getVariables().part, '');
 });
+
+test('M1-E compiler emits per-event elapsed time IR and types it as a number', () => {
+  const add = statement('rbxl_add_score', {}, { VALUE: { block: value('rbxl_event_elapsed_time') } });
+  const result = compileBlocklyWorkspace({ blocks: { blocks: [statement('rbxl_when_start', {}, {}, add)] } });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.events[0].body[0].amount, { op: 'eventElapsed' });
+});
+
+test('M1-E event elapsed time is measured from each task start and not shared between tasks', () => {
+  const runtime = createScriptingRuntime({ version: 1, events: [
+    { event: 'touch', target: 'door', body: [
+      { op: 'wait', seconds: { op: 'number', value: 0.1 } },
+      { op: 'setVariable', name: 'touchElapsed', value: { op: 'eventElapsed' } },
+      { op: 'setVariable', name: 'sinceGame', value: { op: 'elapsed' } }
+    ] }
+  ] });
+  for (let i = 0; i < 10; i++) runtime.update(0.05); // ゲーム開始から約0.5秒進めてからイベントを起こす
+  runtime.onTouch({ id: 'door', name: 'Door' }, 'local');
+  for (let i = 0; i < 10; i++) runtime.update(0.05);
+  const variables = runtime.getVariables();
+  assert.ok(variables.touchElapsed >= 0.1 && variables.touchElapsed < 0.25, 'イベント開始からの経過: ' + variables.touchElapsed);
+  assert.ok(variables.sinceGame > variables.touchElapsed + 0.4, 'ゲーム開始からの経過はイベント経過より大きい');
+});
+
+test('M1-E event elapsed time is 0 outside an event task context', () => {
+  const runtime = createScriptingRuntime({ version: 1, events: [
+    { event: 'start', body: [{ op: 'setVariable', name: 't', value: { op: 'eventElapsed' } }] }
+  ] });
+  runtime.start();
+  runtime.update(0.016);
+  assert.ok(runtime.getVariables().t < 0.1);
+});
