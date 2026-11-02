@@ -22,6 +22,8 @@ export default function GameView({ server, desc, onExit }) {
   const [progress, setProgress] = useState('');
   const [showLog, setShowLog] = useState(true);
   const [completed, setCompleted] = useState(false);
+  const [ruleMessage, setRuleMessage] = useState('');
+  const [ruleScore, setRuleScore] = useState(0);
 
   useEffect(() => {
     let dead = false;
@@ -29,6 +31,7 @@ export default function GameView({ server, desc, onExit }) {
     const game = new Game(hostRef.current);
     gameRef.current = game;
     setCompleted(false);
+    setRuleMessage(''); setRuleScore(0);
     const log = (kind, text) => { if (!dead) setLines((l) => [...l.slice(-80), { kind, text }]); };
 
     (async () => {
@@ -62,6 +65,16 @@ export default function GameView({ server, desc, onExit }) {
         game.setLogic(pkg.logic, {
           onComplete: () => { if (!dead) setCompleted(true); },
           onRestart: () => { if (!dead) setCompleted(false); }
+        });
+        game.setScripting(pkg.scripting, {
+          onMessage: (message) => { if (!dead) { setRuleMessage(message); window.setTimeout(() => { if (!dead) setRuleMessage(''); }, 2600); } },
+          onScore: (score) => { if (!dead) setRuleScore(score); },
+          onWarning: (message) => log('warn', message)
+        });
+        game.setEventRules(pkg.eventRules, {
+          onMessage: (message) => { if (!dead) { setRuleMessage(message); window.setTimeout(() => { if (!dead) setRuleMessage(''); }, 2600); } },
+          onScore: (score) => { if (!dead) setRuleScore(score); },
+          onWarning: (message) => log('warn', message)
         });
         game.setRules(pkg.manifest?.rules);
         game.setWorld(world);
@@ -138,6 +151,7 @@ export default function GameView({ server, desc, onExit }) {
           >ジャンプ</button>
         </div>
       )}
+      {phase === 'playing' && (ruleMessage || ruleScore !== 0) && <div className="game-rule-hud">{ruleMessage && <div className="game-rule-message">{ruleMessage}</div>}{ruleScore !== 0 && <div className="game-rule-score">スコア {ruleScore}</div>}</div>}
       <div className="game-topbar">
         <button className="game-chip" onClick={onExit}>← 退出</button>
         <span className="game-title">{server.name}</span>

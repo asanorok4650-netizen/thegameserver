@@ -18,10 +18,8 @@ export function useStudio() {
   const hRef = useRef(h);
   hRef.current = h;
   const doc = h.present;
-
   const say = useCallback((text, kind = '') => setMessage({ text, kind }), []);
 
-  // 初回: ローカルの下書きがあれば復元(通信なし)
   useEffect(() => {
     let dead = false;
     loadDraft().then((d) => {
@@ -35,21 +33,19 @@ export function useStudio() {
     return () => { dead = true; };
   }, [say]);
 
-  // 自動保存(ローカルのみ。変更が止まって1.5秒後)
+  // 自動下書き保存は編集中の内容を残せるよう、検証エラーがあっても継続する。
   useEffect(() => {
     if (!ready || !isDirty(h)) return undefined;
     const t = setTimeout(() => { saveDraft(hRef.current.present); }, 1500);
     return () => clearTimeout(t);
   }, [h.present, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ページを離れる/閉じる時に未保存を警告
   useEffect(() => {
     const onBefore = (e) => { if (isDirty(hRef.current)) { e.preventDefault(); e.returnValue = ''; } };
     window.addEventListener('beforeunload', onBefore);
     return () => window.removeEventListener('beforeunload', onBefore);
   }, []);
 
-  // 選択のうち、削除されたパーツのidを落とす
   useEffect(() => {
     setSelection((sel) => {
       if (!sel.length) return sel;
@@ -59,7 +55,6 @@ export function useStudio() {
     });
   }, [doc]);
 
-  /** doc を更新して履歴に積む。fn は (doc) => 新doc | { doc, select:[ids] } */
   const apply = useCallback((fn, key = null) => {
     let select = null;
     setH((prev) => {
@@ -92,6 +87,8 @@ export function useStudio() {
     nudge: (ids, delta) => apply((d) => movePartsBy(d, ids, delta), 'nudge'),
     meta: (p, key) => apply((d) => setMeta(d, p), key || 'meta'),
     rules: (patch, key) => apply((d) => setRules(d, patch), key || 'rules'),
+    eventRules: (rules) => apply((d) => ({ ...d, eventRules: rules }), 'event-rules'),
+    scripting: (scripting) => apply((d) => ({ ...d, scripting }), 'scripting-workspace'),
     environment: (patch, key) => apply((d) => setEnvironment(d, patch), key || 'env'),
     behavior: (ids, id) => apply((d) => setPartBehavior(d, ids, id)),
     behaviorParam: (id, key, value) => apply((d) => setPartBehaviorParam(d, id, key, value), 'bparam-' + id + '-' + key),
@@ -106,7 +103,7 @@ export function useStudio() {
       const { doc: next, warnings } = await openFile(file);
       setH((p) => reset(p, next));
       setSelection([]);
-      say(`「${next.name}」を開きました(パーツ ${next.parts.length}個)${warnings.length ? ` / 警告 ${warnings.length}件` : ''}`, 'ok');
+      say('「' + next.name + '」を開きました(パーツ ' + next.parts.length + '個)' + (warnings.length ? ' / 警告 ' + warnings.length + '件' : ''), 'ok');
     } catch (e) { say(e.message || String(e), 'error'); }
     finally { setBusy(false); }
   }, [say]);
@@ -116,18 +113,20 @@ export function useStudio() {
     try {
       const size = await downloadTgw(hRef.current.present);
       setH((p) => markSaved(p));
-      say(`.tgw を書き出しました(${(size / 1048576).toFixed(2)}MB)`, 'ok');
+      say('.tgw を書き出しました(' + (size / 1048576).toFixed(2) + 'MB)', 'ok');
     } catch (e) { say(e.message || String(e), 'error'); }
     finally { setBusy(false); }
   }, [say]);
 
   const saveLocal = useCallback(async () => {
-    const ok = await saveDraft(hRef.current.present);
+    const current = hRef.current.present;
+    const { errors } = checkDoc(current);
+    if (errors.length) { say(errors.join(' / '), 'error'); return; }
+    const ok = await saveDraft(current);
     if (ok) setH((p) => markSaved(p));
     say(ok ? 'このブラウザに保存しました' : 'このブラウザには保存できませんでした(.tgw の書き出しをご利用ください)', ok ? 'ok' : 'error');
   }, [say]);
 
-  /** 公開(サーバーへ送るのはここだけ) */
   const publish = useCallback(async () => {
     const d = hRef.current.present;
     const { errors } = checkDoc(d);
@@ -139,7 +138,7 @@ export function useStudio() {
       const r = await publishDoc(d, CONFIG.adminPassphrase);
       setH((p) => markSaved(commit(p, setMeta(p.present, { publishedId: r.id }), { key: 'publish' })));
       saveDraft({ ...hRef.current.present, publishedId: r.id });
-      say(`公開しました(${(r.size / 1048576).toFixed(2)}MB)${r.replaced ? ' / 公開済みのワールドを更新しました' : ''}`, 'ok');
+      say('公開しました(' + (r.size / 1048576).toFixed(2) + 'MB)' + (r.replaced ? ' / 公開済みのワールドを更新しました' : ''), 'ok');
     } catch (e) {
       const { describeError } = await import('../servers/api.js');
       console.error('publish failed', e);

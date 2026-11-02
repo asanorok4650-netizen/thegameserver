@@ -8,6 +8,8 @@ import { LOGICS, getLogicDefinition, getLogicDefaults } from '../logics/index.js
 import FieldForm from './FieldForm.jsx';
 import { BEHAVIOR_LIST, BEHAVIORS, resolveBehavior } from '../behaviors/index.js';
 import { RULE_FIELDS, ENV_FIELDS, defaultRules, defaultEnvironment } from '../game/rules.js';
+import BlockEditor from './BlockEditor.jsx';
+import BlocklyEditor from './BlocklyEditor.jsx';
 
 const SHAPE_LABEL = { block: '箱', ball: '球', cylinder: '円柱', wedge: 'くさび', corner: '角くさび' };
 const GRID_STEPS = [0, 0.5, 1, 2, 4];
@@ -67,7 +69,7 @@ function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate, onBehav
       {one && <BehaviorSection part={one} ids={ids} onBehavior={onBehavior} onParam={onParam} />}
       {one && (
         <div className="st-field">
-          <span className="st-label">ロジックタグ</span>
+          <span className="st-label">旧ロジック用タグ（互換）</span>
           {logic?.tags?.length ? (
             <div className="st-tag-options">
               {logic.tags.map((tag) => (
@@ -82,7 +84,7 @@ function Inspector({ parts, grid, logic, onPatch, onRemove, onDuplicate, onBehav
                 </label>
               ))}
             </div>
-          ) : <p className="st-note">ワールド設定でロジックを選ぶと、利用できるタグが表示されます。</p>}
+          ) : <p className="st-note">旧ロジックを利用するワールドでのみ使用します。新規ワールドではイベントルールを使ってください。</p>}
           <label className="st-field"><span className="st-label">追加タグ(カンマ区切り)</span>
             <input className="text-input" defaultValue={(one.tags || []).filter((t) => !logic?.tags?.some((x) => x.id === t)).join(', ')} key={one.id + '-custom-tags'}
               onBlur={(e) => {
@@ -104,6 +106,8 @@ export default function StudioPage({ onExit }) {
   const vpRef = useRef(null);
   const fileRef = useRef(null);
   const [tab, setTab] = useState('select');
+  const [workspace, setWorkspace] = useState('3d');
+  const [blockMode, setBlockMode] = useState('blockly');
   const [grid, setGrid] = useState(1);
   const [filter, setFilter] = useState('');
   const sel = new Set(selection);
@@ -179,6 +183,10 @@ export default function StudioPage({ onExit }) {
         <button className="game-chip st-chip" onClick={leave}>← 戻る</button>
         <strong className="st-title">{doc.name}{st.dirty ? ' •' : ''}</strong>
         <span className="st-spacer" />
+        <div className="st-workspace-switch" role="group" aria-label="中央エリア">
+          <button type="button" className={`st-workspace-tab${workspace === '3d' ? ' active' : ''}`} onClick={() => setWorkspace('3d')}>▦ 3Dビュー</button>
+          <button type="button" className={`st-workspace-tab${workspace === 'blocks' ? ' active' : ''}`} onClick={() => setWorkspace('blocks')}>▣ ブロック</button>
+        </div>
         <button className="st-btn" disabled={!st.canUndo} onClick={actions.undo} title="元に戻す (Ctrl+Z)">↶</button>
         <button className="st-btn" disabled={!st.canRedo} onClick={actions.redo} title="やり直す (Ctrl+Y)">↷</button>
         <select className="st-select" value={grid} onChange={(e) => setGrid(Number(e.target.value))} aria-label="グリッド">
@@ -193,12 +201,24 @@ export default function StudioPage({ onExit }) {
 
       <div className="studio-body">
         <div className="studio-view">
-          <div className="studio-canvas" ref={hostRef} />
-          <div className="studio-addbar">
-            {[...SHAPES].map((s) => <button key={s} className="game-chip" onClick={() => addShape(s)}>＋{SHAPE_LABEL[s]}</button>)}
-            <button className="game-chip" onClick={() => vpRef.current && vpRef.current.focusAll()}>全体</button>
+          <div className={`studio-canvas${workspace === '3d' ? '' : ' is-hidden'}`} ref={hostRef} />
+          <div className={`studio-block-canvas${workspace === 'blocks' ? '' : ' is-hidden'}`}>
+            <div className="st-block-mode-switch" role="group" aria-label="ブロックエディター">
+              <button type="button" className={blockMode === 'blockly' ? 'active' : ''} onClick={() => setBlockMode('blockly')}>Blocklyエディター</button>
+              <button type="button" className={blockMode === 'legacy' ? 'active' : ''} onClick={() => setBlockMode('legacy')}>旧ルールエディター</button>
+            </div>
+            {blockMode === 'blockly' ? (
+              <BlocklyEditor initialState={doc.scripting?.workspace || null}
+                onChange={(workspaceState) => actions.scripting({ version: 1, workspace: workspaceState })} />
+            ) : <div className="st-legacy-block-editor"><BlockEditor rules={doc.eventRules || []} parts={doc.parts} onChange={actions.eventRules} /></div>}
           </div>
-          <div className="studio-hint">ドラッグ: 回転 / Shift+ドラッグ・2本指: 移動 / ホイール・ピンチ: ズーム / タップ: 選択(Shift: 追加)</div>
+          {workspace === '3d' && <>
+            <div className="studio-addbar">
+              {[...SHAPES].map((s) => <button key={s} className="game-chip" onClick={() => addShape(s)}>＋{SHAPE_LABEL[s]}</button>)}
+              <button className="game-chip" onClick={() => vpRef.current && vpRef.current.focusAll()}>全体</button>
+            </div>
+            <div className="studio-hint">ドラッグ: 回転 / Shift+ドラッグ・2本指: 移動 / ホイール・ピンチ: ズーム / タップ: 選択(Shift: 追加)</div>
+          </>}
         </div>
 
         <aside className="studio-side">
@@ -232,7 +252,7 @@ export default function StudioPage({ onExit }) {
                   <input className="text-input" value={doc.description} maxLength={300} onChange={(e) => actions.meta({ description: e.target.value }, 'wdesc')} /></label>
                 <label className="st-field"><span className="st-label">最大人数(1〜64)</span>
                   <input className="text-input st-num" type="number" min="1" max="64" value={doc.players.max} onChange={(e) => actions.meta({ players: { max: e.target.value } }, 'wmax')} /></label>
-                <label className="st-field"><span className="st-label">ゲームロジック</span>
+                <label className="st-field"><span className="st-label">旧ゲームロジック（互換）</span>
                   <select className="text-input" value={doc.logic?.id || 'none'} onChange={(e) => {
                     const id = e.target.value;
                     actions.meta({ logic: id === 'none' ? null : { id, version: 1, params: getLogicDefaults(id) } }, 'wlogic');
@@ -272,6 +292,7 @@ export default function StudioPage({ onExit }) {
                     <button className="secondary-button" type="button" onClick={() => actions.rules(defaultRules())}>既定値に戻す</button>
                   </div>
                 </details>
+                <p className="st-note">イベントルールは上部の「ブロック」画面から編集できます。</p>
                 <details className="st-details">
                   <summary>空・光・霧</summary>
                   <div className="st-logic-config">

@@ -1,5 +1,6 @@
 // .tgw の検証(ZIPライブラリ非依存の純関数)。Studioのアップロード前と、クライアント/ルーム起動時の読み込みで使う。
 // 仕様: tgw-spec-v0.1 §3 §4 §8
+import { validateEventRules } from '../rules/schema.js';
 
 export const SUPPORTED_MAJOR = 1;
 export const LIMITS = { maxEntries: 2000, maxTotalUnpacked: 300 * 1024 * 1024, maxPackedBytes: 100 * 1024 * 1024 };
@@ -64,6 +65,16 @@ export function validateManifest(m) {
     if (m.logic.params !== undefined && (typeof m.logic.params !== 'object' || m.logic.params === null || Array.isArray(m.logic.params))) fail('manifest.logic.params はオブジェクトにしてください');
   }
   if (m.rules !== undefined && (typeof m.rules !== 'object' || m.rules === null || Array.isArray(m.rules))) fail('manifest.rules はオブジェクトにしてください');
+  if (m.eventRules !== undefined) {
+    if (!Array.isArray(m.eventRules) || m.eventRules.length > 100) fail('manifest.eventRules は100件以内の配列にしてください');
+    const errors = validateEventRules(m.eventRules);
+    if (errors.length) fail(errors[0]);
+  }
+  if (m.scripting !== undefined) {
+    if (!m.scripting || typeof m.scripting !== 'object' || Array.isArray(m.scripting)) fail('manifest.scripting はオブジェクトにしてください');
+    if (m.scripting.version !== 1) fail('manifest.scripting.version は1にしてください');
+    if (m.scripting.workspace !== undefined && m.scripting.workspace !== null && (typeof m.scripting.workspace !== 'object' || Array.isArray(m.scripting.workspace))) fail('manifest.scripting.workspace はオブジェクトにしてください');
+  }
   if (m.thumbnail !== undefined) { if (typeof m.thumbnail !== 'string') fail('manifest.thumbnail が不正です'); checkEntryPath(m.thumbnail); }
   return m;
 }

@@ -52,12 +52,12 @@ export async function loadWorldPackage(bytes, log = () => {}) {
     const { manifest, worldJson } = readTgw(bytes);
     const src = manifest.source || {};
     return {
-      format, worldJson, manifest, logic: resolveLogicConfig(manifest.logic), warnings: [],
+      format, worldJson, manifest, logic: resolveLogicConfig(manifest.logic), eventRules: manifest.eventRules || [], scripting: manifest.scripting?.workspace || null, warnings: [],
       report: { approx: src.approx || {}, ignored: src.ignored || {}, spawnFound: (worldJson.spawns || []).length > 0 },
       info: `.tgw「${manifest.name}」 パーツ ${worldJson.parts.length}個`
     };
   }
   const tree = parseRbxl(bytes);
   const { worldJson, report } = treeToWorldJson(tree, log);
-  return { format, worldJson, manifest: null, logic: resolveLogicConfig(null), report, warnings: tree.warnings, info: `rbxl インスタンス ${tree.instances.size}個` };
+  return { format, worldJson, manifest: null, logic: resolveLogicConfig(null), eventRules: [], scripting: null, report, warnings: tree.warnings, info: `rbxl インスタンス ${tree.instances.size}個` };
 }

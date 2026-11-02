@@ -7,7 +7,10 @@ import { makeAnimator } from './character.js';
 import { disposeWorld } from './world.js';
 import { sphereIntersectsOBB } from './collision.js';
 import { createLogicRuntime } from '../logics/index.js';
+import { createRuleRuntime } from '../rules/runtime.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
+import { compileBlocklyWorkspace } from '../scripting/compiler.js';
+import { createBlocklyRuntime } from '../scripting/runtime.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
@@ -43,7 +46,9 @@ export class Game {
     this.jumpHeld = false;
     this.world = null; this.collision = null; this.spawn = [0, 10, 0]; this.initialSpawn = this.spawn.slice();
     this.logic = null; this.logicRuntime = null; this.logicHandlers = {};
-    this.activeTriggers = new Set(); this.completed = false;
+    this.eventRulesConfig = []; this.eventRuleHandlers = {}; this.ruleRuntime = null; this.ruleTriggerParts = []; this.activeRuleTriggers = new Set();
+    this.scriptingWorkspace = null; this.scriptRuntime = null; this.scriptHandlers = {};
+    this.activeTriggers = new Set(); this.activeScriptTriggers = new Set(); this.completed = false;
     this.holder = null; this.avatar = null; this.anim = null;
     this.last = performance.now();
     this.minY = -500;
@@ -112,14 +117,59 @@ export class Game {
     });
   }
 
+  setScripting(workspace, handlers = {}) {
+    this.scriptingWorkspace = workspace || null;
+    this.scriptHandlers = handlers;
+    const compiled = compileBlocklyWorkspace(this.scriptingWorkspace);
+    if (compiled.errors.length) handlers.onWarning?.('スクリプトのコンパイル警告: ' + compiled.errors.join(' / '));
+    this.scriptRuntime = createBlocklyRuntime(compiled, {
+      onScore: handlers.onScore,
+      onMessage: handlers.onMessage,
+      onWarning: handlers.onWarning,
+      setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; }
+    });
+    if (this.world) { this.scriptRuntime.start(); this.scriptRuntime.onSpawn(); }
+  }
+
+  setEventRules(rules, handlers = {}) {
+    this.eventRulesConfig = Array.isArray(rules) ? rules : [];
+    this.eventRuleHandlers = handlers;
+    if (this.world) this._createRuleRuntime();
+  }
+
+  _createRuleRuntime() {
+    this.ruleRuntime = this.eventRulesConfig.length ? createRuleRuntime(this.eventRulesConfig, {
+      parts: this.world?.ruleParts || [],
+      onScore: this.eventRuleHandlers.onScore,
+      onMessage: this.eventRuleHandlers.onMessage,
+      onWarning: this.eventRuleHandlers.onWarning,
+      teleport: (position) => { this.p.set(position[0], position[1], position[2]); this.vel.set(0, 0, 0); },
+      setCheckpoint: (position) => { this.spawn = position.slice(); },
+      respawn: () => this.respawn(),
+      complete: () => {
+        this.completed = true;
+        this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
+        this.vel.set(0, 0, 0);
+        this.logicHandlers.onComplete?.();
+      }
+    }) : null;
+    const watched = this.ruleRuntime?.watchedPartIds();
+    this.ruleTriggerParts = watched && this.world?.ruleTriggers ? this.world.ruleTriggers.filter((part) => watched.has(part.id)) : (this.world?.ruleTriggers || []);
+    this.activeRuleTriggers.clear();
+    this.ruleRuntime?.start();
+  }
+
   setWorld(world) {
     this.world = world; this.collision = world.collision;
     if (world.environment) this.setEnvironment(world.environment);
     this.spawn = world.spawn.slice(); this.initialSpawn = world.spawn.slice();
+    this._createRuleRuntime();
     this.scene.add(world.group);
     const b = world.collision.bounds();
     this.minY = b ? Math.min(-500, b.min[1] - 300) : -500;
     this.respawn();
+    this.scriptRuntime?.start();
+    this.scriptRuntime?.onSpawn();
   }
 
   setAvatar(built) {
@@ -140,12 +190,18 @@ export class Game {
     this.vel.set(0, 0, 0);
     this.grounded = false;
     this.activeTriggers.clear();
+    this.activeRuleTriggers.clear();
+    this.activeScriptTriggers.clear();
   }
 
   restart() {
     this.completed = false;
     this.spawn = this.initialSpawn.slice();
     this.logicRuntime?.reset?.();
+    this.ruleRuntime?.reset?.();
+    this.scriptRuntime?.reset?.();
+    this.scriptRuntime?.start();
+    this.scriptRuntime?.onSpawn();
     this.keys.clear();
     this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
     this.respawn();
@@ -161,7 +217,7 @@ export class Game {
   }
 
   _checkTriggers() {
-    if (!this.logicRuntime || !this.world?.triggers?.length || this.completed) return;
+    if ((!this.logicRuntime && !this.ruleRuntime?.usesContactEvents && !this.scriptRuntime) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
     const now = new Set();
     for (const trigger of this.world.triggers) {
       let touching = false;
@@ -173,7 +229,7 @@ export class Game {
       }
       if (!touching) continue;
       now.add(trigger.id);
-      if (!this.activeTriggers.has(trigger.id)) {
+      if (this.logicRuntime && !this.activeTriggers.has(trigger.id)) {
         for (const tag of trigger.tags) {
           this.logicRuntime.onContact({ tag, part: trigger, position: this.p });
           if (this.completed) break;
@@ -182,6 +238,28 @@ export class Game {
       if (this.completed) break;
     }
     this.activeTriggers = now;
+    if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
+      const activeScripts = new Set();
+      for (const trigger of this.world.ruleTriggers) {
+        let touching = false;
+        for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
+        if (touching) {
+          activeScripts.add(trigger.id);
+          if (!this.activeScriptTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger);
+        }
+      }
+      this.activeScriptTriggers = activeScripts;
+    }
+    if (this.ruleRuntime?.usesContactEvents && this.ruleTriggerParts.length) {
+      const active = new Set();
+      for (const trigger of this.ruleTriggerParts) {
+        let touching = false;
+        for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
+        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onTouch(trigger); }
+        else if (this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onLeave(trigger);
+      }
+      this.activeRuleTriggers = active;
+    }
   }
 
   update(dt) {
@@ -229,6 +307,8 @@ export class Game {
     this.floor = grounded ? floorNow : null; // 今乗っている衝突体(動く床・コンベア用)
     this._checkTriggers();
     this.logicRuntime?.update?.({ position: this.p, dt });
+    this.ruleRuntime?.update?.(dt);
+    this.scriptRuntime?.update?.(dt);
     if (this.holder) {
       this.holder.position.copy(this.p);
       this.holder.rotation.y = this.heading;

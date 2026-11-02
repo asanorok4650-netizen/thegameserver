@@ -6,6 +6,7 @@ import { createManifest } from '../tgw/manifest.js';
 import { SHAPES } from '../tgw/validate.js';
 import { RULE_FIELDS, ENV_FIELDS, resolveRules, resolveEnvironment, diffFromDefault } from '../game/rules.js';
 import { resolveBehavior, setBehavior } from '../behaviors/index.js';
+import { normalizeEventRules, validateEventRules } from '../rules/schema.js';
 
 export const IDENT = Object.freeze([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
@@ -18,22 +19,20 @@ export function createDoc(opts = {}) {
     description: opts.description || '',
     players: { max: 8, sendHz: 10, ...(opts.players || {}) },
     logic: opts.logic || null,
-    rules: resolveRules(opts.rules),             // 物理(歩く速さ・ジャンプ力・重力)。常に検証済みの全項目
-    environment: resolveEnvironment(opts.environment), // 空・光・霧
+    eventRules: normalizeEventRules(opts.eventRules),
+    scripting: opts.scripting && typeof opts.scripting === 'object' ? opts.scripting : { version: 1, workspace: null },
+    rules: resolveRules(opts.rules),
+    environment: resolveEnvironment(opts.environment),
     spawns: opts.spawns || [],
     parts: opts.parts || [],
     nextId: 1,
-    source: opts.source || null, // 取り込み元(rbxl変換時の ignored/approx)。manifest.source にそのまま戻す
+    source: opts.source || null,
     publishedId: opts.publishedId || null
   };
   base.nextId = nextIdFor(base.parts);
   return base;
 }
 
-/**
- * 保存済みの下書き(古い版で作られたもの含む)を、いまのドキュメント形式に整える。
- * 新しく増えた項目(rules / environment など)が無くても落ちないようにする。入力は書き換えない。
- */
 export function normalizeDoc(raw) {
   const d = raw && typeof raw === 'object' ? raw : {};
   const parts = Array.isArray(d.parts) ? d.parts.map((p) => clonePart(p)) : [];
@@ -42,6 +41,8 @@ export function normalizeDoc(raw) {
     description: typeof d.description === 'string' ? d.description : '',
     players: d.players,
     logic: d.logic || null,
+    eventRules: d.eventRules,
+    scripting: d.scripting,
     rules: d.rules,
     environment: d.environment,
     spawns: Array.isArray(d.spawns) ? d.spawns.map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })) : [],
@@ -53,14 +54,12 @@ export function normalizeDoc(raw) {
   return base;
 }
 
-/** 空のワールド: 地面1枚 + スポーン1つ(開いてすぐ形になるように) */
 export function createStarterDoc(name = 'Untitled World') {
   let d = createDoc({ name });
   d = addPart(d, { name: 'Baseplate', size: [128, 1, 128], pos: [0, -0.5, 0], color: '#6b8e4e' }).doc;
   return addSpawn(d, { pos: [0, 0.5, 0], size: [6, 1, 6] });
 }
 
-/** loadWorldPackage の戻り値(または { worldJson, manifest, report })からドキュメントを作る */
 export function docFromPackage(pkg, fallbackName = 'Imported World') {
   const m = pkg.manifest || {};
   const w = pkg.worldJson;
@@ -69,6 +68,8 @@ export function docFromPackage(pkg, fallbackName = 'Imported World') {
     description: m.description || '',
     players: m.players,
     logic: m.logic || null,
+    eventRules: m.eventRules,
+    scripting: m.scripting,
     rules: m.rules,
     environment: w.environment,
     spawns: (w.spawns || []).map((s) => ({ pos: s.pos.slice(), size: s.size.slice() })),
@@ -77,7 +78,6 @@ export function docFromPackage(pkg, fallbackName = 'Imported World') {
   });
 }
 
-/** ドキュメント → { worldJson, manifest }(buildTgw にそのまま渡せる) */
 export function docToPackage(doc, extra = {}) {
   const worldJson = {
     formatVersion: WORLD_FORMAT_VERSION, units: 'studs', up: '+Y',
@@ -85,10 +85,10 @@ export function docToPackage(doc, extra = {}) {
     parts: doc.parts.map(clonePart)
   };
   const env = diffFromDefault(resolveEnvironment(doc.environment), ENV_FIELDS);
-  if (env) worldJson.environment = env; // 既定値のままなら書かない
+  if (env) worldJson.environment = env;
   const manifest = createManifest(worldJson, null, {
     name: doc.name, description: doc.description, author: extra.author || '',
-    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, rules: diffFromDefault(resolveRules(doc.rules), RULE_FIELDS) || undefined
+    generator: 'thegameserver-studio', players: doc.players, logic: doc.logic || undefined, eventRules: doc.eventRules?.length ? doc.eventRules : undefined, scripting: doc.scripting, rules: diffFromDefault(resolveRules(doc.rules), RULE_FIELDS) || undefined
   });
   if (doc.source) manifest.source = doc.source;
   return { worldJson, manifest };
@@ -104,7 +104,6 @@ function nextIdFor(parts) {
 
 const num = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
 
-/** 新しいパーツを作る(idは doc.nextId から採番)。@returns { doc, id } */
 export function addPart(doc, init = {}) {
   const id = 'p' + doc.nextId;
   const size = (init.size || [4, 1, 2]).map((v) => Math.max(0.05, num(v, 1)));
@@ -124,7 +123,6 @@ export function addPart(doc, init = {}) {
   return { doc: { ...doc, parts: [...doc.parts, part], nextId: doc.nextId + 1 }, id };
 }
 
-/** 値の正規化(不正値は無視して元の値を残す)。Studioの入力欄から直接渡せる */
 function sanitize(patch, old) {
   const out = {};
   for (const [k, v] of Object.entries(patch)) {
@@ -142,7 +140,6 @@ function sanitize(patch, old) {
   return out;
 }
 
-/** 複数パーツを更新。patch は { color:'#ff0000' } のような一部だけでよい。ids は配列 */
 export function updateParts(doc, ids, patch) {
   const set = new Set(ids);
   let changed = false;
@@ -156,7 +153,6 @@ export function updateParts(doc, ids, patch) {
   return changed ? { ...doc, parts } : doc;
 }
 
-/** 選択パーツを (dx,dy,dz) だけ動かす */
 export function movePartsBy(doc, ids, d) {
   const set = new Set(ids);
   return { ...doc, parts: doc.parts.map((p) => (set.has(p.id) ? { ...p, pos: [p.pos[0] + d[0], p.pos[1] + d[1], p.pos[2] + d[2]] } : p)) };
@@ -168,7 +164,6 @@ export function removeParts(doc, ids) {
   return { ...doc, parts: doc.parts.filter((p) => !set.has(p.id)) };
 }
 
-/** 複製。少しずらして置く。@returns { doc, ids:[新しいid] } */
 export function duplicateParts(doc, ids, offset = [2, 0, 2]) {
   const set = new Set(ids);
   let d = doc;
@@ -181,7 +176,7 @@ export function duplicateParts(doc, ids, offset = [2, 0, 2]) {
   return { doc: d, ids: newIds };
 }
 
-// ---- 物理ルール・環境(数値だけ。範囲外は丸め、不正値は無視) ----
+// ---- 物理ルール・環境 ----
 export function setRules(doc, patch) {
   return { ...doc, rules: resolveRules({ ...resolveRules(doc.rules), ...patch }) };
 }
@@ -189,18 +184,14 @@ export function setEnvironment(doc, patch) {
   return { ...doc, environment: resolveEnvironment({ ...resolveEnvironment(doc.environment), ...patch }) };
 }
 
-// ---- パーツの振る舞い(attrs.behavior とそのパラメータ) ----
-/** 選んだパーツ全部の振る舞いを切り替える。id が空なら外す */
 export function setPartBehavior(doc, ids, id) {
   const set = new Set(ids);
   return { ...doc, parts: doc.parts.map((p) => (set.has(p.id) ? { ...p, attrs: setBehavior(p.attrs, id) } : p)) };
 }
-/** 振る舞いのパラメータを1つ変える(範囲は resolveBehavior が表示・実行の両方で丸める) */
 export function setPartBehaviorParam(doc, id, key, value) {
   return { ...doc, parts: doc.parts.map((p) => (p.id === id && resolveBehavior(p.attrs) ? { ...p, attrs: { ...p.attrs, [key]: value } } : p)) };
 }
 
-// ---- スポーン ----
 export function addSpawn(doc, s) {
   return { ...doc, spawns: [...doc.spawns, { pos: s.pos.slice(), size: (s.size || [6, 1, 6]).slice() }] };
 }
@@ -208,7 +199,6 @@ export function removeSpawn(doc, index) {
   return { ...doc, spawns: doc.spawns.filter((_, i) => i !== index) };
 }
 
-// ---- メタ情報 ----
 export function setMeta(doc, patch) {
   const next = { ...doc };
   if (typeof patch.name === 'string') next.name = patch.name.slice(0, 80);
@@ -220,38 +210,35 @@ export function setMeta(doc, patch) {
     if (Number.isFinite(hz) && hz > 0 && hz <= 60) next.players.sendHz = hz;
   }
   if (patch.logic !== undefined) next.logic = patch.logic;
+  if (patch.eventRules !== undefined) next.eventRules = normalizeEventRules(patch.eventRules);
   if (patch.publishedId !== undefined) next.publishedId = patch.publishedId;
   return next;
 }
 
-/** 公開前の確認(エラー=公開不可 / 警告=公開は可能) */
+/** 公開・明示保存・.tgw 書き出し前の確認(エラー=処理不可 / 警告=続行可能) */
 export function checkDoc(doc) {
   const errors = [], warnings = [];
   if (!doc.name.trim()) errors.push('ワールド名を入力してください');
   if (!doc.parts.length) errors.push('パーツがありません');
+  errors.push(...validateEventRules(doc.eventRules || []));
   if (!doc.spawns.length) warnings.push('スポーンがありません(原点付近から開始します)');
   if (doc.parts.length > 50000) warnings.push('パーツが5万個を超えています。読み込みが重くなる場合があります');
   const ignored = doc.source && doc.source.ignored;
-  if (ignored) for (const [k, v] of Object.entries(ignored)) warnings.push(`${k} ${v}件は変換時に取り込まれていません`);
+  if (ignored) for (const [k, v] of Object.entries(ignored)) warnings.push(k + ' ' + v + '件は変換時に取り込まれていません');
   return { errors, warnings };
 }
 
 export const docBounds = (doc) => worldBounds({ parts: doc.parts });
 
-// ---- 回転ヘルパー(Studioの入力欄はY軸の角度だけ扱う。複合回転は「リセット」まで触らない) ----
-/** Y軸まわりだけの回転ならその角度(度)、そうでなければ null */
 export function yawOf(rot) {
   const eps = 1e-4;
   if (Math.abs(rot[1]) > eps || Math.abs(rot[3]) > eps || Math.abs(rot[5]) > eps || Math.abs(rot[7]) > eps || Math.abs(rot[4] - 1) > eps) return null;
-  return Math.round(Math.atan2(rot[2], rot[0]) * 180 / Math.PI * 100) / 100 + 0; // +0 は -0 を 0 にする
+  return Math.round(Math.atan2(rot[2], rot[0]) * 180 / Math.PI * 100) / 100 + 0;
 }
-/** Y軸まわり deg 度の回転行列(行優先。world.json の rot と同じ並び) */
 export function rotY(deg) {
   const a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
   return [c, 0, s, 0, 1, 0, -s, 0, c];
 }
-
-// ---- 3軸の回転(度)。Robloxの Orientation と同じ順序 R = Ry * Rx * Rz ----
 export function eulerToRot(xDeg, yDeg, zDeg) {
   const d = Math.PI / 180;
   const cx = Math.cos(xDeg * d), sx = Math.sin(xDeg * d);
@@ -263,7 +250,6 @@ export function eulerToRot(xDeg, yDeg, zDeg) {
     -sy * cz + cy * sx * sz, sy * sz + cy * sx * cz, cy * cx
   ];
 }
-/** 回転行列 → [x,y,z](度)。X=±90°(真上/真下を向く)では Z を 0 にまとめる */
 export function rotToEuler(m) {
   const r2 = (v) => Math.round(v * 100) / 100 + 0;
   const x = Math.asin(Math.max(-1, Math.min(1, -m[5])));
