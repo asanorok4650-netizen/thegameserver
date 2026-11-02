@@ -7,9 +7,8 @@ import { makeAnimator } from './character.js';
 import { disposeWorld } from './world.js';
 import { sphereIntersectsOBB } from './collision.js';
 import { createLogicRuntime } from '../logics/index.js';
-import { createRuleRuntime } from '../rules/runtime.js';
+import { createProgramIR } from '../scripting/ir.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
-import { compileBlocklyWorkspace } from '../scripting/compiler.js';
 import { createBlocklyRuntime } from '../scripting/runtime.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
@@ -120,55 +119,56 @@ export class Game {
   setScripting(workspace, handlers = {}) {
     this.scriptingWorkspace = workspace || null;
     this.scriptHandlers = handlers;
-    const compiled = compileBlocklyWorkspace(this.scriptingWorkspace);
-    if (compiled.errors.length) handlers.onWarning?.('スクリプトのコンパイル警告: ' + compiled.errors.join(' / '));
-    this.scriptRuntime = createBlocklyRuntime(compiled, {
-      onScore: handlers.onScore,
-      onMessage: handlers.onMessage,
-      onWarning: handlers.onWarning,
-      setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; }
-    });
-    if (this.world) { this.scriptRuntime.start(); this.scriptRuntime.onSpawn(); }
+    if (this.world) this._createUnifiedRuntime();
   }
 
   setEventRules(rules, handlers = {}) {
     this.eventRulesConfig = Array.isArray(rules) ? rules : [];
     this.eventRuleHandlers = handlers;
-    if (this.world) this._createRuleRuntime();
+    if (this.world) this._createUnifiedRuntime();
   }
 
-  _createRuleRuntime() {
-    this.ruleRuntime = this.eventRulesConfig.length ? createRuleRuntime(this.eventRulesConfig, {
-      parts: this.world?.ruleParts || [],
-      onScore: this.eventRuleHandlers.onScore,
-      onMessage: this.eventRuleHandlers.onMessage,
-      onWarning: this.eventRuleHandlers.onWarning,
-      teleport: (position) => { this.p.set(position[0], position[1], position[2]); this.vel.set(0, 0, 0); },
-      setCheckpoint: (position) => { this.spawn = position.slice(); },
+  _createUnifiedRuntime() {
+    this.ruleRuntime = null; // 旧ランタイムは共通IRへ移行
+    this.ruleTriggerParts = [];
+    const program = createProgramIR({ workspace: this.scriptingWorkspace, eventRules: this.eventRulesConfig });
+    const handlers = { ...this.eventRuleHandlers, ...this.scriptHandlers };
+    if (program.errors?.length) handlers.onWarning?.('スクリプトのコンパイル警告: ' + program.errors.join(' / '));
+    const parts = this.world?.ruleParts || [];
+    const findPart = (key) => parts.find((p) => p.id === key || p.name === key);
+    const atPart = (key) => {
+      const part = findPart(key);
+      if (!part) { handlers.onWarning?.('対象パーツが見つかりません: ' + key); return null; }
+      return [part.pos[0], part.pos[1] + part.size[1] / 2 + 0.2, part.pos[2]];
+    };
+    this.scriptRuntime?.stop?.();
+    this.scriptRuntime = createBlocklyRuntime(program, {
+      onScore: handlers.onScore,
+      onMessage: handlers.onMessage,
+      onWarning: handlers.onWarning,
+      setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; },
+      teleportToPart: (key) => { const p = atPart(key); if (p) { this.p.set(...p); this.vel.set(0,0,0); } },
+      checkpointAtPart: (key) => { const p = atPart(key); if (p) this.spawn = p; },
       respawn: () => this.respawn(),
       complete: () => {
-        this.completed = true;
-        this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
-        this.vel.set(0, 0, 0);
-        this.logicHandlers.onComplete?.();
-      }
-    }) : null;
-    const watched = this.ruleRuntime?.watchedPartIds();
-    this.ruleTriggerParts = watched && this.world?.ruleTriggers ? this.world.ruleTriggers.filter((part) => watched.has(part.id)) : (this.world?.ruleTriggers || []);
-    this.activeRuleTriggers.clear();
-    this.ruleRuntime?.start();
+        this.completed = true; this.keys.clear(); this.joy.x = 0; this.joy.y = 0;
+        this.jumpHeld = false; this.vel.set(0,0,0); this.logicHandlers.onComplete?.();
+      },
+      setPartVisible: (key, visible) => this.world?.setPartVisible?.(key, visible),
+      movePart: (key, position) => this.world?.movePart?.(key, position)
+    });
+    this.scriptRuntime.start();
   }
 
   setWorld(world) {
     this.world = world; this.collision = world.collision;
     if (world.environment) this.setEnvironment(world.environment);
     this.spawn = world.spawn.slice(); this.initialSpawn = world.spawn.slice();
-    this._createRuleRuntime();
+    this._createUnifiedRuntime();
     this.scene.add(world.group);
     const b = world.collision.bounds();
     this.minY = b ? Math.min(-500, b.min[1] - 300) : -500;
     this.respawn();
-    this.scriptRuntime?.start();
     this.scriptRuntime?.onSpawn();
   }
 
@@ -198,7 +198,6 @@ export class Game {
     this.completed = false;
     this.spawn = this.initialSpawn.slice();
     this.logicRuntime?.reset?.();
-    this.ruleRuntime?.reset?.();
     this.scriptRuntime?.reset?.();
     this.scriptRuntime?.start();
     this.scriptRuntime?.onSpawn();
@@ -217,7 +216,7 @@ export class Game {
   }
 
   _checkTriggers() {
-    if ((!this.logicRuntime && !this.ruleRuntime?.usesContactEvents && !this.scriptRuntime) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
+    if ((!this.logicRuntime && !this.scriptRuntime) || !this.world?.triggers?.length && !this.world?.ruleTriggers?.length || this.completed) return;
     const now = new Set();
     for (const trigger of this.world.triggers) {
       let touching = false;
@@ -250,13 +249,13 @@ export class Game {
       }
       this.activeScriptTriggers = activeScripts;
     }
-    if (this.ruleRuntime?.usesContactEvents && this.ruleTriggerParts.length) {
+    if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
       const active = new Set();
       for (const trigger of this.ruleTriggerParts) {
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
-        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onTouch(trigger); }
-        else if (this.activeRuleTriggers.has(trigger.id)) this.ruleRuntime.onLeave(trigger);
+        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger); }
+        else if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger);
       }
       this.activeRuleTriggers = active;
     }
@@ -307,7 +306,6 @@ export class Game {
     this.floor = grounded ? floorNow : null; // 今乗っている衝突体(動く床・コンベア用)
     this._checkTriggers();
     this.logicRuntime?.update?.({ position: this.p, dt });
-    this.ruleRuntime?.update?.(dt);
     this.scriptRuntime?.update?.(dt);
     if (this.holder) {
       this.holder.position.copy(this.p);
