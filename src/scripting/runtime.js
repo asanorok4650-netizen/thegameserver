@@ -95,7 +95,7 @@ export function createScriptingRuntime(program, api = {}) {
         }
         case 'forever':
           // 1回のフレームに処理が集中しないよう、反復ごとに次フレームへ譲る。
-          while (!stopped) { yield 0; yield* runSteps(step.body, depth+1); }
+          while (!stopped) { yield 0; yield* runSteps(step.body, depth+1, context); }
           break;
         case 'addScore': {
           const amount = clamp(read(step.amount, context)); score = clamp(score + amount);
