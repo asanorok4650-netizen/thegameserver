@@ -141,9 +141,9 @@ export function createScriptingRuntime(program, api = {}) {
           } else warnOnce('パーツのプロパティ設定APIが利用できません');
           yield 0; break;
         case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
-        case 'teleportToPart': api.teleportToPart?.(step.part, step.player || 'local'); yield 0; break;
+        case 'teleportToPart': { const accepted = api.teleportToPart?.(step.part, step.player || 'local'); if (accepted === false) warnOnce('プレイヤーの移動先またはIDが不正です: ' + String(step.player || 'local')); yield 0; break; }
         case 'checkpointAtPart': api.checkpointAtPart?.(step.part); yield 0; break;
-        case 'respawn': api.respawn?.(step.player || 'local'); yield 0; break;
+        case 'respawn': { const accepted = api.respawn?.(step.player || 'local'); if (accepted === false) warnOnce('リスポーン対象のプレイヤーIDが不正です: ' + String(step.player || 'local')); yield 0; break; }
         case 'complete': stopped = true; api.complete?.(); return;
         default: warnOnce('未対応の処理命令をスキップしました: ' + String(step.op || 'unknown').slice(0, 80)); yield 0;
       }
