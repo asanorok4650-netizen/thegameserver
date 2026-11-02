@@ -38,6 +38,14 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_set_checkpoint', message0: 'チェックポイントを設定する', previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_teleport', message0: 'プレイヤーをパーツ %1 に移動する', args0: [{ type: 'field_input', name: 'PART', text: 'Spawn' }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_respawn', message0: 'プレイヤーをリスポーンさせる', previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_player_get_number', message0: 'プレイヤー %1 の %2', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_dropdown', name: 'PROPERTY', options: [['HP', 'health'], ['最大HP', 'maxHealth'], ['位置 X', 'positionX'], ['位置 Y', 'positionY'], ['位置 Z', 'positionZ'], ['移動速度', 'walkSpeed'], ['ジャンプ力', 'jumpPower']] }], output: 'Number', colour: 205 },
+    { type: 'rbxl_player_is_alive', message0: 'プレイヤー %1 は生存している', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }], output: 'Boolean', colour: 205 },
+    { type: 'rbxl_player_set_health', message0: 'プレイヤー %1 の HP を %2 にする', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', value: 100, min: 0, max: 100000 }], previousStatement: null, nextStatement: null, colour: 205 },
+    { type: 'rbxl_player_set_position', message0: 'プレイヤー %1 を X %2 Y %3 Z %4 に移動する', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'X', value: 0 }, { type: 'field_number', name: 'Y', value: 10 }, { type: 'field_number', name: 'Z', value: 0 }], previousStatement: null, nextStatement: null, colour: 205 },
+    { type: 'rbxl_player_set_walk_speed', message0: 'プレイヤー %1 の移動速度を %2 にする', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', value: 16, min: 0, max: 200 }], previousStatement: null, nextStatement: null, colour: 205 },
+    { type: 'rbxl_player_set_jump_power', message0: 'プレイヤー %1 のジャンプ力を %2 にする', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', value: 12, min: 0, max: 200 }], previousStatement: null, nextStatement: null, colour: 205 },
+    { type: 'rbxl_player_damage', message0: 'プレイヤー %1 に %2 ダメージを与える', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', value: 10, min: 0, max: 100000 }], previousStatement: null, nextStatement: null, colour: 205 },
+    { type: 'rbxl_player_heal', message0: 'プレイヤー %1 を %2 回復する', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', value: 10, min: 0, max: 100000 }], previousStatement: null, nextStatement: null, colour: 205 },
     { type: 'rbxl_complete', message0: 'ゲームをクリアにする', previousStatement: null, nextStatement: null, colour: 145 },
 
     // Variables. Keep the Phase 1 text-name block for saved-workspace compatibility.
@@ -75,7 +83,12 @@ const toolbox = {
     ] },
     { kind: 'category', name: 'アクション', colour: '#43a879', contents: [
       block('rbxl_add_score'), block('rbxl_show_message'), block('rbxl_part_visible'),
-      block('rbxl_move_part'), block('rbxl_color'), block('rbxl_part_set_color'), block('rbxl_part_get_color'), block('rbxl_part_set_size'), block('rbxl_part_set_position'), block('rbxl_part_set_rotation'), block('rbxl_part_set_transparency'), block('rbxl_part_set_collision'), block('rbxl_part_get_number'), block('rbxl_part_get_collision'), block('rbxl_set_checkpoint'), block('rbxl_teleport'), block('rbxl_respawn'), block('rbxl_complete')
+      block('rbxl_move_part'), block('rbxl_color'), block('rbxl_part_set_color'), block('rbxl_part_get_color'), block('rbxl_part_set_size'), block('rbxl_part_set_position'), block('rbxl_part_set_rotation'), block('rbxl_part_set_transparency'), block('rbxl_part_set_collision'), block('rbxl_part_get_number'), block('rbxl_part_get_collision'), block('rbxl_set_checkpoint'), block('rbxl_complete')
+    ] },
+    { kind: 'category', name: 'プレイヤー', colour: '#438bd0', contents: [
+      block('rbxl_player_get_number'), block('rbxl_player_is_alive'), block('rbxl_player_set_health'),
+      block('rbxl_player_set_position'), block('rbxl_player_set_walk_speed'), block('rbxl_player_set_jump_power'),
+      block('rbxl_player_damage'), block('rbxl_player_heal'), block('rbxl_teleport'), block('rbxl_respawn')
     ] },
     { kind: 'category', name: '変数', colour: '#a879ce', custom: 'VARIABLE' },
     { kind: 'category', name: 'データ', colour: '#b18ad5', contents: [
