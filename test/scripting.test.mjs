@@ -174,3 +174,24 @@ test('compiler clamps invalid numeric fields and reports malformed numeric value
   assert.ok(result.errors.some((error) => error.includes('数値フィールドが不正です: rbxl_move_part.X')));
   assert.deepEqual(result.events[0].body[0].position, [0, 1e9, -1e9]);
 });
+
+
+test('compiler reports invalid unary math operators', () => {
+  const workspace = start(statement('rbxl_add_score', {}, {
+    VALUE: { block: statement('math_single', { OP: 'EXECUTE' }, { NUM: { block: value('math_number', { NUM: 2 }) } }) }
+  }));
+  assert.ok(compileBlocklyWorkspace(workspace).errors.some((error) => error.includes('未対応の単項演算子: EXECUTE')));
+});
+
+test('runtime warns once for unknown instructions and sanitizes non-finite numbers', () => {
+  const warnings = [];
+  const runtime = createBlocklyRuntime({ version: 1, events: [{ event: 'start', body: [
+    { op: 'futureInstruction' },
+    { op: 'addScore', amount: { op: 'number', value: Infinity } },
+    { op: 'futureInstruction' }
+  ] }] }, { onWarning: (warning) => warnings.push(warning) });
+  runtime.start();
+  for (let i = 0; i < 4; i++) runtime.update(1 / 60);
+  assert.equal(runtime.getScore(), 0);
+  assert.equal(warnings.filter((warning) => warning.includes('futureInstruction')).length, 1);
+});
