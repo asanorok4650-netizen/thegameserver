@@ -25,6 +25,16 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_show_message', message0: 'メッセージ %1 を表示', args0: [{ type: 'field_input', name: 'TEXT', text: 'こんにちは！' }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_part_visible', message0: 'パーツ %1 を表示 %2', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_checkbox', name: 'VISIBLE', checked: true }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_move_part', message0: 'パーツ %1 の位置を X %2 Y %3 Z %4 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'X', value: 0 }, { type: 'field_number', name: 'Y', value: 0 }, { type: 'field_number', name: 'Z', value: 0 }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_color', message0: '%1', args0: [{ type: 'field_colour', name: 'COLOR', colour: '#ff0000' }], output: 'Colour', colour: 160 },
+    { type: 'rbxl_part_set_color', message0: 'パーツ %1 の色を %2 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'input_value', name: 'VALUE', check: 'Colour' }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_get_color', message0: 'パーツ %1 の色', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], output: 'String', colour: 160 },
+    { type: 'rbxl_part_set_size', message0: 'パーツ %1 のサイズを X %2 Y %3 Z %4 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'X', value: 4, min: 0.1, max: 1000 }, { type: 'field_number', name: 'Y', value: 1, min: 0.1, max: 1000 }, { type: 'field_number', name: 'Z', value: 2, min: 0.1, max: 1000 }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_set_position', message0: 'パーツ %1 の位置を X %2 Y %3 Z %4 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'X', value: 0 }, { type: 'field_number', name: 'Y', value: 0 }, { type: 'field_number', name: 'Z', value: 0 }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_set_rotation', message0: 'パーツ %1 の回転を X %2 Y %3 Z %4 度にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'X', value: 0 }, { type: 'field_number', name: 'Y', value: 0 }, { type: 'field_number', name: 'Z', value: 0 }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_set_transparency', message0: 'パーツ %1 の透明度を %2 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_number', name: 'VALUE', value: 0, min: 0, max: 1, precision: 0.05 }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_set_collision', message0: 'パーツ %1 の衝突を %2 にする', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_checkbox', name: 'ENABLED', checked: true }], previousStatement: null, nextStatement: null, colour: 145 },
+    { type: 'rbxl_part_get_number', message0: 'パーツ %1 の %2', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }, { type: 'field_dropdown', name: 'PROPERTY', options: [['サイズ X', 'sizeX'], ['サイズ Y', 'sizeY'], ['サイズ Z', 'sizeZ'], ['位置 X', 'positionX'], ['位置 Y', 'positionY'], ['位置 Z', 'positionZ'], ['回転 X', 'rotationX'], ['回転 Y', 'rotationY'], ['回転 Z', 'rotationZ'], ['透明度', 'transparency']] }], output: 'Number', colour: 160 },
+    { type: 'rbxl_part_get_collision', message0: 'パーツ %1 は衝突する', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], output: 'Boolean', colour: 160 },
     { type: 'rbxl_set_checkpoint', message0: 'チェックポイントを設定する', previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_teleport', message0: 'プレイヤーをパーツ %1 に移動する', args0: [{ type: 'field_input', name: 'PART', text: 'Spawn' }], previousStatement: null, nextStatement: null, colour: 145 },
     { type: 'rbxl_respawn', message0: 'プレイヤーをリスポーンさせる', previousStatement: null, nextStatement: null, colour: 145 },
@@ -65,7 +75,7 @@ const toolbox = {
     ] },
     { kind: 'category', name: 'アクション', colour: '#43a879', contents: [
       block('rbxl_add_score'), block('rbxl_show_message'), block('rbxl_part_visible'),
-      block('rbxl_move_part'), block('rbxl_set_checkpoint'), block('rbxl_teleport'), block('rbxl_respawn'), block('rbxl_complete')
+      block('rbxl_move_part'), block('rbxl_color'), block('rbxl_part_set_color'), block('rbxl_part_get_color'), block('rbxl_part_set_size'), block('rbxl_part_set_position'), block('rbxl_part_set_rotation'), block('rbxl_part_set_transparency'), block('rbxl_part_set_collision'), block('rbxl_part_get_number'), block('rbxl_part_get_collision'), block('rbxl_set_checkpoint'), block('rbxl_teleport'), block('rbxl_respawn'), block('rbxl_complete')
     ] },
     { kind: 'category', name: '変数', colour: '#a879ce', custom: 'VARIABLE' },
     { kind: 'category', name: 'データ', colour: '#b18ad5', contents: [
