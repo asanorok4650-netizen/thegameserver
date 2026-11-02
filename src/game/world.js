@@ -121,7 +121,12 @@ export function buildSceneFromWorld(worldJson) {
   const setPartVisible = (key, visible) => {
     const record = findRecord(key);
     if (!record) return false;
-    record.visible = !!visible;
+    const nextVisible = !!visible;
+    if (record.visible !== nextVisible && record.item) {
+      if (nextVisible) collision.add(record.item); else collision.remove(record.item);
+    }
+    record.visible = nextVisible;
+    record.trigger.enabled = nextVisible;
     applyPartMatrix(record);
     return true;
   };
