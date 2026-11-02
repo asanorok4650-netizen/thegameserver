@@ -98,3 +98,19 @@ test('繰り返しは作業量の上限を超えても、後のフレームで�
   const r = run(start(statement('rbxl_repeat', { TIMES: 50 }, { DO: { block: statement('rbxl_add_score', {}, { VALUE: { block: value('rbxl_number', { VALUE: 1 }) } }) } })), 400);
   assert.equal(r.runtime.getScore(), 50);
 });
+
+test('unsupported statement and value blocks produce explicit compiler errors', () => {
+  const unsupportedStatement = start(statement('controls_whileUntil', {}, {
+    BOOL: bool(true),
+    DO: { block: msg('not executed') }
+  }));
+  const statementResult = compileBlocklyWorkspace(unsupportedStatement);
+  assert.ok(statementResult.errors.some((error) => error.includes('未対応の処理ブロック: controls_whileUntil')));
+
+  const unsupportedValue = start(statement('rbxl_add_score', {}, {
+    VALUE: { block: value('text', { TEXT: 'not a number' }) }
+  }));
+  const valueResult = compileBlocklyWorkspace(unsupportedValue);
+  assert.ok(valueResult.errors.some((error) => error.includes('未対応の値ブロック: text')));
+});
+
