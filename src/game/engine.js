@@ -169,7 +169,6 @@ export class Game {
     const b = world.collision.bounds();
     this.minY = b ? Math.min(-500, b.min[1] - 300) : -500;
     this.respawn();
-    this.scriptRuntime?.onSpawn();
   }
 
   setAvatar(built) {
@@ -192,6 +191,7 @@ export class Game {
     this.activeTriggers.clear();
     this.activeRuleTriggers.clear();
     this.activeScriptTriggers.clear();
+    this.scriptRuntime?.onSpawn();
   }
 
   restart() {
@@ -200,7 +200,6 @@ export class Game {
     this.logicRuntime?.reset?.();
     this.scriptRuntime?.reset?.();
     this.scriptRuntime?.start();
-    this.scriptRuntime?.onSpawn();
     this.keys.clear();
     this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
     this.respawn();
