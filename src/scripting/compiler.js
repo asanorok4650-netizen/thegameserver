@@ -9,7 +9,7 @@ const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
   'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time', 'rbxl_part_get_number', 'rbxl_player_get_number'
 ]);
-const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join']);
+const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join', 'rbxl_event_player_id', 'rbxl_event_part_id', 'rbxl_event_part_name', 'rbxl_event_type']);
 const COLOR_BLOCKS = new Set(['rbxl_color', 'rbxl_part_get_color']);
 const LIST_BLOCKS = new Set(['rbxl_list_create']);
 const BOOLEAN_BLOCKS = new Set([
@@ -84,6 +84,10 @@ export function compileBlocklyWorkspace(workspace) {
       case 'rbxl_number': return { op: 'number', value: numericField(block, 'VALUE') };
       case 'math_number': return { op: 'number', value: numericField(block, 'NUM') };
       case 'rbxl_text': return { op: 'string', value: String(field(block, 'TEXT', '')).slice(0, MAX_TEXT) };
+      case 'rbxl_event_player_id': return { op: 'eventGet', property: 'playerId' };
+      case 'rbxl_event_part_id': return { op: 'eventGet', property: 'partId' };
+      case 'rbxl_event_part_name': return { op: 'eventGet', property: 'partName' };
+      case 'rbxl_event_type': return { op: 'eventGet', property: 'eventType' };
       case 'rbxl_color': return { op: 'string', value: String(field(block, 'COLOR', '#ff0000')).slice(0, 7) };
       case 'rbxl_part_get_color': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'color' };
       case 'rbxl_part_get_number': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: String(field(block, 'PROPERTY', 'positionX')) };
