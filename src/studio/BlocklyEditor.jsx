@@ -63,7 +63,7 @@ const toolbox = {
     ] },
     { kind: 'category', name: '標準ブロック', colour: '#8793a5', contents: [
       block('controls_if'), block('controls_repeat_ext'), block('controls_whileUntil'),
-      block('math_single'), block('math_modulo'), block('text')
+      block('math_single'), block('math_modulo')
     ] }
   ]
 };
