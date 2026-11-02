@@ -9,7 +9,8 @@ const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
   'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time'
 ]);
-const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join']);
+const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join', 'rbxl_part_get_color']);
+const COLOR_BLOCKS = new Set(['rbxl_color']);
 const LIST_BLOCKS = new Set(['rbxl_list_create']);
 const BOOLEAN_BLOCKS = new Set([
   'rbxl_compare', 'logic_compare', 'logic_operation',
@@ -47,6 +48,8 @@ export function compileBlocklyWorkspace(workspace) {
     if (NUMBER_BLOCKS.has(block?.type)) return 'Number';
     if (BOOLEAN_BLOCKS.has(block?.type)) return 'Boolean';
     if (STRING_BLOCKS.has(block?.type)) return 'String';
+    if (COLOR_BLOCKS.has(block?.type)) return 'Colour';
+    if (block?.type === 'rbxl_part_get_collision') return 'Boolean';
     if (LIST_BLOCKS.has(block?.type)) return 'Array';
     return 'Unknown';
   };
@@ -80,6 +83,10 @@ export function compileBlocklyWorkspace(workspace) {
       case 'rbxl_number': return { op: 'number', value: numericField(block, 'VALUE') };
       case 'math_number': return { op: 'number', value: numericField(block, 'NUM') };
       case 'rbxl_text': return { op: 'string', value: String(field(block, 'TEXT', '')).slice(0, MAX_TEXT) };
+      case 'rbxl_color': return { op: 'string', value: String(field(block, 'COLOR', '#ff0000')).slice(0, 7) };
+      case 'rbxl_part_get_color': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'color' };
+      case 'rbxl_part_get_number': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: String(field(block, 'PROPERTY', 'positionX')) };
+      case 'rbxl_part_get_collision': return { op: 'partGet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'collide' };
       case 'rbxl_text_join': return { op: 'concat', a: value(block, 'A', depth, 'String'), b: value(block, 'B', depth, 'String') };
       case 'rbxl_random': return { op: 'random', min: value(block, 'MIN', depth), max: value(block, 'MAX', depth) };
       case 'rbxl_elapsed_time': return { op: 'elapsed' };
@@ -171,6 +178,15 @@ export function compileBlocklyWorkspace(workspace) {
           out.push({ op: 'partVisible', part: String(field(block, 'PART', '')).slice(0, 100), visible: field(block, 'VISIBLE') === true || field(block, 'VISIBLE') === 'TRUE' }); break;
         case 'rbxl_move_part':
           out.push({ op: 'movePart', part: String(field(block, 'PART', '')).slice(0, 100), position: ['X','Y','Z'].map((k) => numericField(block, k)) }); break;
+        case 'rbxl_part_set_color': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'color', value: value(block, 'VALUE', depth, 'Colour') }); break;
+        case 'rbxl_part_set_size':
+        case 'rbxl_part_set_position':
+        case 'rbxl_part_set_rotation': {
+          const property = ({ rbxl_part_set_size: 'size', rbxl_part_set_position: 'position', rbxl_part_set_rotation: 'rotation' })[block.type];
+          out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property, value: { op: 'vector', values: ['X','Y','Z'].map((k) => ({ op: 'number', value: numericField(block, k) })) } }); break;
+        }
+        case 'rbxl_part_set_transparency': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'transparency', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_part_set_collision': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'collide', value: { op: 'boolean', value: field(block, 'ENABLED') === true || field(block, 'ENABLED') === 'TRUE' } }); break;
         case 'rbxl_set_checkpoint': out.push({ op: 'checkpoint' }); break;
         case 'rbxl_teleport': out.push({ op: 'teleportToPart', part: String(field(block, 'PART', '')).slice(0, 100) }); break;
         case 'rbxl_respawn': out.push({ op: 'respawn' }); break;
