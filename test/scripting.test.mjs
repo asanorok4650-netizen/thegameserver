@@ -114,3 +114,32 @@ test('unsupported statement and value blocks produce explicit compiler errors', 
   assert.ok(valueResult.errors.some((error) => error.includes('未対応の値ブロック: text')));
 });
 
+test('toolbox standard math and variable blocks compile and execute', () => {
+  const math = statement('rbxl_add_score', {}, {
+    VALUE: { block: statement('math_modulo', {}, {
+      DIVIDEND: { block: value('math_number', { NUM: 9 }) },
+      DIVISOR: { block: value('math_number', { NUM: 4 }) }
+    }) }
+  });
+  const abs = statement('rbxl_add_score', {}, {
+    VALUE: { block: statement('math_single', { OP: 'ABS' }, {
+      NUM: { block: value('math_number', { NUM: -5 }) }
+    }) }
+  });
+  const workspace = {
+    variables: [{ id: 'coins-id', name: 'coins' }],
+    blocks: { blocks: [start(statement('variables_set', {}, {
+      VALUE: { block: value('math_number', { NUM: 3 }) }
+    }, statement('rbxl_add_score', {}, {
+      VALUE: { block: value('variables_get', { VAR: { id: 'coins-id', name: 'coins' } }) }
+    }))).blocks.blocks[0]] }
+  };
+  workspace.blocks.blocks[0].next.block.next = { block: math };
+  math.next = { block: abs };
+
+  const result = run(workspace);
+  assert.deepEqual(result.program.errors, []);
+  assert.equal(result.runtime.getVariables().coins, 3);
+  assert.equal(result.runtime.getScore(), 9);
+});
+
