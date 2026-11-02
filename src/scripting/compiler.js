@@ -182,11 +182,11 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_move_part':
           out.push({ op: 'movePart', part: String(field(block, 'PART', '')).slice(0, 100), position: ['X','Y','Z'].map((k) => numericField(block, k)) }); break;
         case 'rbxl_part_set_color': out.push({ op: 'partSet', part: String(field(block, 'PART', '')).slice(0, 100), property: 'color', value: value(block, 'VALUE', depth, 'Colour') }); break;
-        case 'rbxl_player_set_health': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'health', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
-        case 'rbxl_player_set_walk_speed': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'walkSpeed', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
-        case 'rbxl_player_set_jump_power': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'jumpPower', value: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_player_set_health': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'health', value: value(block, 'VALUE', depth) }); break;
+        case 'rbxl_player_set_walk_speed': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'walkSpeed', value: value(block, 'VALUE', depth) }); break;
+        case 'rbxl_player_set_jump_power': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'jumpPower', value: value(block, 'VALUE', depth) }); break;
         case 'rbxl_player_set_position': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'position', value: { op: 'vector', values: ['X','Y','Z'].map((k) => ({ op: 'number', value: numericField(block, k) })) } }); break;
-        case 'rbxl_player_damage': out.push({ op: 'playerDamage', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: { op: 'number', value: numericField(block, 'VALUE') } }); break;
+        case 'rbxl_player_damage': out.push({ op: 'playerDamage', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: value(block, 'VALUE', depth) }); break;
         case 'rbxl_player_heal': out.push({ op: 'playerHeal', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: { op: 'number', value: numericField(block, 'VALUE') } }); break;
         case 'rbxl_part_set_size':
         case 'rbxl_part_set_position':
