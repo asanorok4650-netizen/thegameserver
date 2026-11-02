@@ -23,8 +23,10 @@ export function compileBlocklyWorkspace(workspace) {
   function expression(block, depth) {
     if (!block || depth > MAX_DEPTH || ++count > MAX_BLOCKS) return { op: 'number', value: 0 };
     switch (block.type) {
-      case 'rbxl_number':
-      case 'math_number': return { op: 'number', value: Number(field(block, 'VALUE', 0)) || 0 };
+      case 'rbxl_number': return { op: 'number', value: Number(field(block, 'VALUE', 0)) || 0 };
+      case 'math_number': return { op: 'number', value: Number(field(block, 'NUM', 0)) || 0 };
+      case 'math_modulo': return { op: 'math', operator: 'mod', a: value(block, 'DIVIDEND', depth), b: value(block, 'DIVISOR', depth) };
+      case 'math_single': return { op: 'unary', operator: field(block, 'OP', 'ABS'), value: value(block, 'NUM', depth) };
       case 'math_arithmetic': {
         const op = ({ ADD: 'add', MINUS: 'sub', MULTIPLY: 'mul', DIVIDE: 'div', POWER: 'pow' })[field(block, 'OP')] || 'add';
         return { op: 'math', operator: op, a: value(block, 'A', depth), b: value(block, 'B', depth) };
