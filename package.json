@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node test/rigs.test.mjs && node --import ./test/register.mjs test/builder.test.mjs && node --import ./test/register.mjs test/rbxm.test.mjs && node test/mesh.test.mjs && node test/worker.test.mjs && node test/api.test.mjs && node test/tgw.test.mjs && node test/studio.test.mjs && node test/logics.test.mjs && node test/obby-runtime.test.mjs && node test/rules.test.mjs && node test/rules-runtime.test.mjs && node test/scripting.test.mjs"
+    "test": "node test/rigs.test.mjs && node --import ./test/register.mjs test/builder.test.mjs && node --import ./test/register.mjs test/rbxm.test.mjs && node test/mesh.test.mjs && node test/tgw.test.mjs && node test/world-part-api.test.mjs && node test/player-api.test.mjs && node test/event-api.test.mjs && node test/studio.test.mjs && node test/logics.test.mjs && node test/obby-runtime.test.mjs && node test/rules.test.mjs && node test/rules-runtime.test.mjs && node test/scripting.test.mjs && node test/unified-scripting.test.mjs"
   },
   "dependencies": {
     "blockly": "^13.4.0",

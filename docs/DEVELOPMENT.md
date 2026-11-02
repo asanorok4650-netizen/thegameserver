@@ -1,6 +1,6 @@
 # 開発者向けガイド
 
-この文書は、現在の安定版ブランチ `feature/capsule-player-collision` の実装を基準にしています。
+この文書は `feature/unified-scripting-runtime` を基準にしています。実装と説明がずれた場合はコードを正として更新してください。
 将来の変更で実装と説明がずれた場合は、コードを正としてこの文書も更新してください。
 
 ## 1. プロジェクト概要
@@ -39,7 +39,7 @@ npm test
 
 `npm run dev` は Vite の開発サーバーを起動します。`npm run build` は本番用ファイルを `dist/` に生成します。
 
-> 注意: このブランチの `package.json` の test スクリプトは `test/worker.test.mjs` と `test/api.test.mjs` も参照していますが、現在のリポジトリツリーにはこれらのファイルがありません。テストを実行する際は、その時点のファイル一覧とスクリプトを確認してください。個別テストは `node test/<name>.test.mjs` で実行できます。Three.js のスタブが必要なテストでは `node --import ./test/register.mjs test/<name>.test.mjs` を使います。
+> 注意: テストスクリプトと実際のテストファイル一覧を一致させてください。個別テストは `node test/<name>.test.mjs` で実行できます。Three.js のスタブが必要なテストでは `node --import ./test/register.mjs test/<name>.test.mjs` を使います。
 
 ## 3. ゲーム起動からワールド表示まで
 
@@ -265,3 +265,34 @@ Worker の環境設定は `worker/wrangler.toml` を参照してください。�
 - `world.json` の仕様を変えたら `validate.js`、`worldjson.js`、Studio入出力、テスト、ドキュメントを同時に確認する。
 - Worker の秘密情報をコミットしない。
 - 変更は機能単位のブランチで行い、安定版ブランチへ直接実装を積まない。
+
+
+## 6.6 Unified Scripting Runtime
+
+このブランチでは、Blockly と旧 eventRules を共通のデータ専用 IR に統合し、同じインタープリターで実行します。
+
+- `src/studio/BlocklyEditor.jsx`: Blockly のブロック定義とワークスペースUI
+- `src/scripting/compiler.js`: Blockly の保存データを IR に変換
+- `src/scripting/ir.js`: Blockly と旧 eventRules を統合した Program IR を生成
+- `src/scripting/runtime.js`: IR を実行するインタープリター
+- `src/game/engine.js`: ワールド設定時に IR と Runtime を生成し、ゲームイベント・フレーム更新と接続
+- `test/scripting.test.mjs`: コンパイラー・Runtime のテスト
+- `test/unified-scripting.test.mjs`: 旧 eventRules と Blockly の統合テスト
+
+### 現在確認できる設計
+
+- 実行対象は JavaScript 文字列ではなく、許可された命令だけを表すデータ形式(IR)です。
+- 任意 JavaScript の評価は行いません。
+- コンパイラーにはブロック数・深さ・テキスト長の上限があります。
+- Runtime にはタスク数・1フレーム当たりのステップ数・作業量・繰り返し回数の上限があります。
+- Runtime は `start` / `spawn` / `touch` / `leave` / `interval` イベントを扱います。
+- 現在の命令には、条件分岐、繰り返し、待機、変数、スコア、メッセージ、パーツ表示・移動、チェックポイント、テレポート、復活、クリアがあります。
+
+### 変更時のルール
+
+1. Blockly のブロック定義を追加したら、`compiler.js` の変換と対応テストも追加する。
+2. IR の命令を追加したら、`runtime.js` の実行処理と Runtime テストを追加する。
+3. 外部から渡す値は型・範囲・サイズを検証する。
+4. Runtime からゲームエンジンへは API アダプター経由で接続し、ゲーム固有の処理をインタープリターへ直接埋め込まない。
+5. `.tgw` に任意実行コードを保存しない。保存形式を変更する場合は互換性・検証・バージョン管理を同時に設計する。
+
