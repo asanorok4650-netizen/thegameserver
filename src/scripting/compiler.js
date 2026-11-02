@@ -7,8 +7,10 @@ const MAX_NUMBER = 1e9;
 
 const NUMBER_BLOCKS = new Set([
   'rbxl_number', 'math_number', 'math_modulo', 'math_single',
-  'math_arithmetic', 'variables_get'
+  'math_arithmetic', 'rbxl_random', 'rbxl_elapsed_time'
 ]);
+const STRING_BLOCKS = new Set(['rbxl_text', 'rbxl_text_join']);
+const LIST_BLOCKS = new Set(['rbxl_list_create']);
 const BOOLEAN_BLOCKS = new Set([
   'rbxl_compare', 'logic_compare', 'logic_operation',
   'logic_negate', 'logic_boolean'
@@ -44,11 +46,18 @@ export function compileBlocklyWorkspace(workspace) {
   const expressionType = (block) => {
     if (NUMBER_BLOCKS.has(block?.type)) return 'Number';
     if (BOOLEAN_BLOCKS.has(block?.type)) return 'Boolean';
+    if (STRING_BLOCKS.has(block?.type)) return 'String';
+    if (LIST_BLOCKS.has(block?.type)) return 'Array';
     return 'Unknown';
   };
   const value = (block, name, depth, expected = 'Number') => {
     const child = block.inputs?.[name]?.block;
-    if (!child) return expected === 'Boolean' ? { op: 'boolean', value: false } : { op: 'number', value: 0 };
+    if (!child) {
+      if (expected === 'Boolean') return { op: 'boolean', value: false };
+      if (expected === 'String') return { op: 'string', value: '' };
+      if (expected === 'Array') return { op: 'list', items: [] };
+      return { op: 'number', value: 0 };
+    }
     const actual = expressionType(child);
     if (actual !== 'Unknown' && actual !== expected) {
       report(`入力型エラー: ${block.type}.${name} は ${expected} が必要ですが ${actual} が接続されています`);
@@ -69,6 +78,13 @@ export function compileBlocklyWorkspace(workspace) {
     switch (block.type) {
       case 'rbxl_number': return { op: 'number', value: numericField(block, 'VALUE') };
       case 'math_number': return { op: 'number', value: numericField(block, 'NUM') };
+      case 'rbxl_text': return { op: 'string', value: String(field(block, 'TEXT', '')).slice(0, MAX_TEXT) };
+      case 'rbxl_text_join': return { op: 'concat', a: value(block, 'A', depth, 'String'), b: value(block, 'B', depth, 'String') };
+      case 'rbxl_random': return { op: 'random', min: value(block, 'MIN', depth), max: value(block, 'MAX', depth) };
+      case 'rbxl_elapsed_time': return { op: 'elapsed' };
+      case 'rbxl_list_create': return { op: 'list', items: ['ADD0', 'ADD1', 'ADD2'].map((key) => value(block, key, depth, 'Any')) };
+      case 'rbxl_list_length': return { op: 'listLength', list: value(block, 'LIST', depth, 'Array') };
+      case 'rbxl_list_get': return { op: 'listGet', list: value(block, 'LIST', depth, 'Array'), index: value(block, 'INDEX', depth) };
       case 'math_modulo': return { op: 'math', operator: 'mod', a: value(block, 'DIVIDEND', depth), b: value(block, 'DIVISOR', depth) };
       case 'math_single': {
         const operator = field(block, 'OP', 'ABS');
@@ -138,12 +154,17 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_add_score': out.push({ op: 'addScore', amount: value(block, 'VALUE', depth) }); break;
         case 'rbxl_show_message': out.push({ op: 'message', text: String(field(block, 'TEXT', '')).slice(0, MAX_TEXT) }); break;
         case 'rbxl_set_variable':
-          out.push({ op: 'setVariable', name: String(field(block, 'NAME', 'value')).slice(0, MAX_NAME), value: value(block, 'VALUE', depth) }); break;
+          out.push({ op: 'setVariable', name: String(field(block, 'NAME', 'value')).slice(0, MAX_NAME), value: value(block, 'VALUE', depth, 'Any') }); break;
         case 'rbxl_set_named_variable':
         case 'rbxl_change_variable':
         case 'variables_set': {
           const name = variableName(block);
-          out.push({ op: block.type === 'rbxl_change_variable' ? 'changeVariable' : 'setVariable', name, value: value(block, 'VALUE', depth) }); break;
+          out.push({ op: block.type === 'rbxl_change_variable' ? 'changeVariable' : 'setVariable', name, value: value(block, 'VALUE', depth, block.type === 'rbxl_change_variable' ? 'Number' : 'Any') }); break;
+        }
+        case 'rbxl_list_add':
+        case 'rbxl_list_replace': {
+          const name = variableName(block);
+          out.push({ op: block.type === 'rbxl_list_add' ? 'listAdd' : 'listReplace', name, index: value(block, 'INDEX', depth), value: value(block, 'VALUE', depth, 'Any') }); break;
         }
         case 'rbxl_part_visible':
           out.push({ op: 'partVisible', part: String(field(block, 'PART', '')).slice(0, 100), visible: field(block, 'VISIBLE') === true || field(block, 'VISIBLE') === 'TRUE' }); break;
