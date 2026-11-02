@@ -24,9 +24,13 @@ export function createScriptingRuntime(program, api = {}) {
       const a = read(node.a), b = read(node.b);
       switch (node.operator) { case 'neq': return a !== b; case 'gt': return a > b; case 'lt': return a < b; case 'gte': return a >= b; case 'lte': return a <= b; default: return a === b; }
     }
+    if (node.op === 'unary') {
+      const n = Number(read(node.value)) || 0;
+      switch (node.operator) { case 'ROOT': return clamp(Math.sqrt(Math.max(0,n))); case 'NEG': return clamp(-n); case 'LN': return clamp(Math.log(Math.max(Number.EPSILON,n))); case 'LOG10': return clamp(Math.log10(Math.max(Number.EPSILON,n))); case 'EXP': return clamp(Math.exp(Math.min(20,n))); case 'POW10': return clamp(10 ** Math.min(9,Math.max(-9,n))); default: return clamp(Math.abs(n)); }
+    }
     if (node.op === 'math') {
       const a = Number(read(node.a)) || 0, b = Number(read(node.b)) || 0;
-      switch (node.operator) { case 'sub': return clamp(a-b); case 'mul': return clamp(a*b); case 'div': return b ? clamp(a/b) : 0; case 'pow': return clamp(Math.pow(a, Math.max(-16, Math.min(16,b)))); default: return clamp(a+b); }
+      switch (node.operator) { case 'sub': return clamp(a-b); case 'mul': return clamp(a*b); case 'div': return b ? clamp(a/b) : 0; case 'mod': return b ? clamp(a%b) : 0; case 'pow': return clamp(Math.pow(a, Math.max(-16, Math.min(16,b)))); default: return clamp(a+b); }
     }
     return 0;
   };
