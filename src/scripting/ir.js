@@ -12,7 +12,9 @@ const expr = (node) => {
   if (node.kind === 'compare') return { op: 'compare', operator: node.op, a: expr(node.left), b: expr(node.right) };
   if (node.kind === 'logic') {
     if (node.op === 'not') return { op: 'not', value: expr(node.items?.[0]) };
-    return { op: node.op === 'or' ? 'or' : 'and', a: expr(node.items?.[0]), b: expr(node.items?.[1]) };
+    const items = (node.items || []).map(expr);
+    if (!items.length) return { op: 'boolean', value: node.op !== 'or' };
+    return items.slice(1).reduce((left, right) => ({ op: node.op === 'or' ? 'or' : 'and', a: left, b: right }), items[0]);
   }
   return num(0);
 };
