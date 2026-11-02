@@ -92,12 +92,12 @@ export function createBlocklyRuntime(program, api = {}) {
       }
       work = MAX_WORK_PER_TICK;
       let budget = MAX_STEPS_PER_TICK;
-      for (let i=tasks.length-1; i>=0 && budget>0; i--) {
+      for (let i=0; i<tasks.length && budget>0; i++) {
         const task = tasks[i];
         if (task.wake > elapsed) continue;
         const result = task.iterator.next();
         budget--;
-        if (result.done) tasks.splice(i,1);
+        if (result.done) { tasks.splice(i,1); i--; }
         else task.wake = elapsed + Math.max(0, Number(result.value) || 0);
       }
       if (tasks.length > MAX_TASKS) tasks.length = MAX_TASKS;
