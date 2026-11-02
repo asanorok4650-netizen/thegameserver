@@ -4,12 +4,16 @@ import { fetchServerFile, loadWorldPackage } from '../game/loader.js';
 import { buildSceneFromWorld } from '../game/world.js';
 import { buildAvatar } from '../avatar/builder.js';
 import { serverFileUrl } from '../servers/api.js';
+import { CONFIG } from '../config.js';
+import { createRoom, getRoomInfo, NetSession } from '../net/session.js';
+import { ROOM_CODE_RE } from '../net/protocol.js';
+import '../net.css';
 
 const JOY_R = 55;
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const mb = (n) => (n / 1048576).toFixed(1) + 'MB';
 
-export default function GameView({ server, desc, onExit }) {
+export default function GameView({ server, desc, playerName, onExit }) {
   const hostRef = useRef(null);
   const gameRef = useRef(null);
   const knobRef = useRef(null);
@@ -17,6 +21,13 @@ export default function GameView({ server, desc, onExit }) {
   const joy = useRef({ id: null, ox: 0, oy: 0 });
   const look = useRef({ id: null, x: 0, y: 0 });
   const descRef = useRef(desc);
+  const sessionRef = useRef(null);
+  const sendHzRef = useRef(10);
+  const [showNet, setShowNet] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [netMsg, setNetMsg] = useState('');
+  const [netRoom, setNetRoom] = useState(null); // { code, host }
+  const [netPlayers, setNetPlayers] = useState([]);
   const [phase, setPhase] = useState('loading');
   const [lines, setLines] = useState([]);
   const [progress, setProgress] = useState('');
@@ -77,6 +88,7 @@ export default function GameView({ server, desc, onExit }) {
           onWarning: (message) => log('warn', message)
         });
         game.setRules(pkg.manifest?.rules);
+        sendHzRef.current = pkg.manifest?.players?.sendHz || 10;
         game.setWorld(world);
 
         log('info', 'キャラクターを配置中…');
@@ -92,8 +104,72 @@ export default function GameView({ server, desc, onExit }) {
       }
     })();
 
-    return () => { dead = true; ac.abort(); game.dispose(); gameRef.current = null; };
+    return () => { dead = true; ac.abort(); sessionRef.current?.leave(); sessionRef.current = null; game.dispose(); gameRef.current = null; };
   }, [server.id]);
+
+  const NET_ERRORS = {
+    API_NOT_CONFIGURED: 'サーバーAPIのURLが未設定です',
+    room_not_configured: 'Workerにマルチプレイ(Durable Object)が設定されていません',
+    not_found: 'ルームが見つかりません',
+    busy: 'ルームを作れませんでした。もう一度試してください',
+    room_active: 'このネットワークからのルームがまだ残っています。終了してから作り直してください'
+  };
+  const NET_CLOSED = {
+    'host-left': 'ホストが退出したため、ルームは終了しました',
+    'p2p-failed': 'ホストと直接つながりませんでした(回線の都合の可能性があります)',
+    'signal-lost': '接続が切れました',
+    closed: 'ルームは終了しました'
+  };
+
+  async function startRoom(create) {
+    const game = gameRef.current;
+    if (!game || sessionRef.current) return;
+    try {
+      setNetMsg('接続中…');
+      let code = joinCode.trim().toUpperCase();
+      let token = '';
+      if (create) { const r = await createRoom(server.id); code = r.roomId; token = r.hostToken; }
+      else {
+        if (!ROOM_CODE_RE.test(code)) throw new Error('BAD_CODE');
+        const info = await getRoomInfo(code);
+        if (info.serverId !== server.id) throw new Error('OTHER_SERVER');
+        if (info.status === 'closed') throw new Error('CLOSED');
+        if (info.players >= info.max) throw new Error('FULL');
+      }
+      const s = new NetSession({
+        code, asHost: create, token, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
+        getLocal: () => game.getNetState(),
+        getTime: () => game.worldTime(),
+        onStatus: (t) => setNetMsg(t),
+        onReady: (sess) => {
+          setNetRoom({ code, host: sess.isHost });
+          if (!sess.isHost) game.netClock = () => sess.getNetTime();
+        },
+        onPlayers: (list) => setNetPlayers(list),
+        onSnapshot: (list) => game.remote.apply(list),
+        onClosed: (reason) => {
+          if (sessionRef.current !== s) return;
+          sessionRef.current = null; game.netClock = null; game.remote.clear();
+          setNetRoom(null); setNetPlayers([]); setNetMsg(NET_CLOSED[reason] || '接続が切れました');
+        }
+      });
+      sessionRef.current = s;
+      s.connect();
+    } catch (e) {
+      const m = String(e.message);
+      if (m === 'cooldown') { setNetMsg(`ルームを作り直せるまで、あと${e.retryAfter || 1}秒です`); return; }
+      setNetMsg(m === 'BAD_CODE' ? 'コードは英数字6文字です' : m === 'OTHER_SERVER' ? '別のサーバーのルームです。そのサーバーを開いてから入力してください'
+        : m === 'CLOSED' ? 'そのルームは終了しています' : m === 'FULL' ? 'ルームが満員です' : NET_ERRORS[m] || 'ルームに接続できませんでした');
+    }
+  }
+
+  function leaveRoom() {
+    sessionRef.current?.leave();
+    sessionRef.current = null;
+    const game = gameRef.current;
+    if (game) { game.netClock = null; game.remote.clear(); }
+    setNetRoom(null); setNetPlayers([]); setNetMsg('');
+  }
 
   function joyDown(e) {
     if (joy.current.id !== null) return;
@@ -155,8 +231,31 @@ export default function GameView({ server, desc, onExit }) {
       <div className="game-topbar">
         <button className="game-chip" onClick={onExit}>← 退出</button>
         <span className="game-title">{server.name}</span>
+        <button className="game-chip" onClick={() => setShowNet((v) => !v)}>{netRoom ? `マルチ ${netPlayers.length}人` : 'マルチ'}</button>
         <button className="game-chip" onClick={() => setShowLog((v) => !v)}>ログ</button>
       </div>
+      {showNet && phase === 'playing' && (
+        <div className="net-panel">
+          {!netRoom ? (
+            <>
+              <button className="net-btn" onClick={() => startRoom(true)} disabled={!!sessionRef.current}>ルームを作成(ホスト)</button>
+              <div className="net-row">
+                <input className="net-input" value={joinCode} maxLength={6} placeholder="コード6文字" autoCapitalize="characters" onChange={(e) => setJoinCode(e.target.value.toUpperCase())} />
+                <button className="net-btn" onClick={() => startRoom(false)} disabled={!!sessionRef.current}>参加</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="net-label">ルームコード</div>
+              <div className="net-code">{netRoom.code}</div>
+              <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.host && p.id === sessionRef.current?.id ? '(ホスト)' : ''}</li>)}</ul>
+              {netRoom.host && <div className="net-note">ホストが抜けるとルームは終了します</div>}
+              <button className="net-btn net-leave" onClick={leaveRoom}>ルームを出る</button>
+            </>
+          )}
+          {netMsg && <div className="net-msg">{netMsg}</div>}
+        </div>
+      )}
       {completed && (
         <div className="game-clear-overlay" role="dialog" aria-modal="true" aria-labelledby="game-clear-title">
           <div className="game-clear-card">

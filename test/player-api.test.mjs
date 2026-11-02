@@ -61,6 +61,7 @@ test('M1-D Runtime uses explicit player adapter methods', () => {
 
 test('Game player adapter clamps stats, validates IDs, handles death and respawn', () => {
   const game = Object.create(Game.prototype);
+  game.rules = { walkSpeed: 16, jumpPower: 50, gravity: 196.2 };
   game.playerStats = { health: 100, maxHealth: 100, alive: true, walkSpeed: null, jumpPower: null };
   game.p = new THREE.Vector3(0, 5, 0);
   game.vel = new THREE.Vector3(1, 2, 3);

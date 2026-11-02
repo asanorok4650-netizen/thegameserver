@@ -10,6 +10,7 @@ import { createLogicRuntime } from '../logics/index.js';
 import { createProgramIR } from '../scripting/ir.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
 import { createScriptingRuntime } from '../scripting/runtime.js';
+import { RemotePlayers } from './remote.js';
 
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
@@ -31,7 +32,10 @@ export class Game {
     this.rules = defaultRules();
     this.floor = null;
     this.time = 0; // 動くパーツ用の経過時間(秒)。世界の時計なので復活・やり直しでは戻さない
+    this.clockOrigin = performance.now(); // 世界時刻の起点。フレームのdtではなく実時間で数える(低FPS・クリア後・裏画面でも進む)
     this.setEnvironment(defaultEnvironment());
+    this.remote = new RemotePlayers(this.scene); // マルチプレイ: 他プレイヤーの表示
+    this.netClock = null; // マルチプレイ(クライアント): ホストの世界時刻(秒)を返す関数。null なら自分の時計だけ
 
     this.p = new THREE.Vector3();
     this.vel = new THREE.Vector3();
@@ -190,6 +194,17 @@ export class Game {
     this.avatar = built;
   }
 
+  /** マルチプレイで送る自分の状態: [x, y, z, 向き, 速さ, 接地] */
+  /** 世界時刻(秒)。マルチプレイのクライアントならホストの時刻、そうでなければこの端末の実時間 */
+  worldTime() {
+    const hostTime = this.netClock?.();
+    return hostTime != null ? hostTime : (performance.now() - this.clockOrigin) / 1000;
+  }
+
+  getNetState() {
+    return [this.p.x, this.p.y, this.p.z, this.heading, Math.hypot(this.vel.x, this.vel.z), this.grounded ? 1 : 0];
+  }
+
   getPlayerProperty(player, property) {
     if (player !== 'local') return null;
     const values = {
@@ -309,8 +324,13 @@ export class Game {
 
   update(dt) {
     dt = Math.min(dt, 0.05);
-    if (this.completed) return;
-    this.time += dt;
+    // 世界時刻: クライアントはホストの時刻、それ以外はこの端末の実時間。dtの丸めやクリア(completed)では止まらない
+    this.time = this.worldTime();
+    if (this.completed) {
+      // クリア後も動く床は動かし続ける(ホストがクリアしても、全員の世界時刻は止まらない)
+      if (this.world?.dynamics?.size) this.world.dynamics.step(this.time, null, null);
+      return;
+    }
     if (!this.playerStats.alive) {
       this.vel.set(0, 0, 0);
       this.logicRuntime?.update?.({ position: this.p, dt });
@@ -380,6 +400,7 @@ export class Game {
     const dt = (now - this.last) / 1000;
     this.last = now;
     if (this.world) this.update(dt);
+    this.remote.update(dt);
     const cp = Math.cos(this.pitch);
     const tx = this.p.x, ty = this.p.y + this.height * 0.75, tz = this.p.z;
     this.camera.position.set(tx + Math.sin(this.yaw) * cp * this.dist, ty + Math.sin(this.pitch) * this.dist, tz + Math.cos(this.yaw) * cp * this.dist);
@@ -389,6 +410,7 @@ export class Game {
 
   dispose() {
     this.scriptRuntime?.stop?.();
+    this.remote.dispose();
     this.renderer.setAnimationLoop(null);
     this.ro.disconnect();
     window.removeEventListener('keydown', this._onKey);

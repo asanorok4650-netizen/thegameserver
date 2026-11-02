@@ -9,3 +9,10 @@ CREATE TABLE IF NOT EXISTS servers (
   created_at  TEXT NOT NULL           -- ISO 8601
 );
 CREATE INDEX IF NOT EXISTS idx_servers_created ON servers (created_at DESC);
+
+-- マルチプレイ: ルーム作成の回数制限。IPはハッシュだけ保存する(同時1ルーム + 終了後のクールダウン)
+CREATE TABLE IF NOT EXISTS room_limits (
+  ip_hash        TEXT PRIMARY KEY,
+  active_room    TEXT,                       -- いま作っているルームのコード。無ければ NULL
+  last_closed_at INTEGER NOT NULL DEFAULT 0  -- 最後にルームが終わった時刻(ミリ秒)
+);

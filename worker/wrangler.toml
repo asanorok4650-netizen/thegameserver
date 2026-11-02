@@ -7,14 +7,23 @@ compatibility_date = "2025-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "rbxl-servers-db"
-database_id = "REPLACE_WITH_DATABASE_ID"   # `wrangler d1 create` の結果を貼る
+database_id = "7c5f87fc-7923-4e04-95da-4b660e486a69"   # `wrangler d1 create` の結果を貼る
 
 [[r2_buckets]]
 binding = "BUCKET"
 bucket_name = "rbxl-servers"
 
+# マルチプレイ(Hybrid P2P)用のRoom。1 Room = 1 Durable Object(SQLite-backed)
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
 [vars]
 # 公開時はサイトのURLに(カンマ区切りで複数可)。例: "https://xxxx.pages.dev,http://localhost:5173"
-ALLOWED_ORIGIN = "*"
+ALLOWED_ORIGIN = "https://thegameserver.pages.dev"
 # 管理用の合言葉は [vars] に書かず、シークレットで保存する:
 #   npx wrangler secret put ADMIN_PASSPHRASE

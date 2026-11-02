@@ -296,3 +296,28 @@ Worker の環境設定は `worker/wrangler.toml` を参照してください。�
 4. Runtime からゲームエンジンへは API アダプター経由で接続し、ゲーム固有の処理をインタープリターへ直接埋め込まない。
 5. `.tgw` に任意実行コードを保存しない。保存形式を変更する場合は互換性・検証・バージョン管理を同時に設計する。
 
+
+
+## 11. マルチプレイ(M2-A: P2P の土台)
+
+`milestone/m2-a-p2p-foundation` 以降。構成は「Host型Star」で、ホストが全員とWebRTCでつながる。
+
+- `src/net/protocol.js`: 通信仕様(THREE・ブラウザ非依存)。`ctl`チャネル(順序あり・信頼)と`st`チャネル(順序なし・再送なし)。`st`のメッセージは連番`n`を持ち、受け取った側は最後に採用した`n`より大きいものだけを使う。
+- `src/net/session.js`: `NetSession`。ホストは各参加者へofferを出し、位置を集めて全員へ配る。参加者は自分の位置を送る。
+- `src/net/clock.js`: `ClockSync`。ホストの世界時刻に合わせる(最小遅延のサンプルを採用)。`Game.worldTime()` は、クライアントならホストの時刻、そうでなければ `performance.now()` 基準の実時間。フレームのdtやクリア(completed)では止まらない。
+- `worker/index.js` の `Room`(Durable Object, SQLite-backed): 参加・退出の通知とSDP/ICEの中継だけ。ゲームのデータは通さない。
+- `worker/room-limit.js` + D1 `room_limits`: ルーム作成の制限。
+
+### Room の状態と再接続
+`waiting`(ホスト待ち。60秒で破棄) → `running` → `host-away`(ホストのWebSocketだけ切れた。45秒の猶予) → `running` / `closed`。
+- ルーム作成で `hostToken` が返る。ホストのWebSocket(`host=1&token=...`)はこのトークンが合う人だけ。切れたら同じトークンで再接続でき、その間もP2Pは続く。
+- ホストが自分から抜ける(`close`)と猶予なしで終了。猶予が切れた場合も終了。ホスト交代はない。
+- 参加者のWebSocketが切れても、P2Pが生きていれば続ける。P2P側は、`PEER_TIMEOUT_MS` の間何も届かない相手を切れたものとして扱う。
+
+### ルーム作成の制限
+同じIP(ハッシュのみ保存)から「同時に1ルーム」「ルーム終了後2分あける」(`ROOM_CREATE_COOLDOWN_MS`)。ホストが一度も来なかったルームはクールダウンなし。管理用の合言葉つきのリクエストは制限しない(設定画面で合言葉を入れている人)。
+- デプロイ時に `worker/schema.sql` を D1 へ流す(`npx wrangler d1 execute rbxl-servers-db --remote --file=./schema.sql`)。未作成でも動くが、制限は効かない(`/api/health` の `roomLimit` が `false`)。
+- 同じネットワーク(学校・会社・携帯回線のNAT)の人は、枠を共有する。
+
+### まだ入っていないこと
+他プレイヤーのトリガー・HP・スコアの同期(M2-B)、TURN、ホスト交代、ホームからのコード入力。
