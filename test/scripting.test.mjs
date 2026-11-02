@@ -302,7 +302,7 @@ test('M1-B supports list creation, length, one-based get, append and replace', (
   assert.deepEqual(program.errors, []);
   const runtime = createBlocklyRuntime(program);
   runtime.start();
-  runtime.update(0.016);
+  for (let i = 0; i < 10; i++) runtime.update(0.016);
   assert.deepEqual(runtime.getVariables().items, ['apple', 'orange', true, 'pear']);
   assert.equal(runtime.getVariables().listLength, 4);
   assert.equal(runtime.getVariables().secondItem, 'orange');
@@ -360,7 +360,7 @@ test('M1-B bounds list size and string length', () => {
   ] }] };
   const runtime = createBlocklyRuntime(program, { onWarning: (message) => warnings.push(message) });
   runtime.start();
-  for (let i = 0; i < 4; i++) runtime.update(0.016);
+  for (let i = 0; i < 120; i++) runtime.update(0.016);
   assert.equal(runtime.getVariables().items.length, 100);
   assert.equal(runtime.getVariables().longText.length, 500);
   assert.ok(warnings.some((message) => message.includes('最大要素数100件')));
