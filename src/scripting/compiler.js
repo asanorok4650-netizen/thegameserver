@@ -70,7 +70,11 @@ export function compileBlocklyWorkspace(workspace) {
       case 'rbxl_number': return { op: 'number', value: numericField(block, 'VALUE') };
       case 'math_number': return { op: 'number', value: numericField(block, 'NUM') };
       case 'math_modulo': return { op: 'math', operator: 'mod', a: value(block, 'DIVIDEND', depth), b: value(block, 'DIVISOR', depth) };
-      case 'math_single': return { op: 'unary', operator: field(block, 'OP', 'ABS'), value: value(block, 'NUM', depth) };
+      case 'math_single': {
+        const operator = field(block, 'OP', 'ABS');
+        if (!['ROOT', 'ABS', 'NEG', 'LN', 'LOG10', 'EXP', 'POW10'].includes(operator)) report('未対応の単項演算子: ' + operator);
+        return { op: 'unary', operator, value: value(block, 'NUM', depth) };
+      }
       case 'math_arithmetic': {
         const operators = { ADD: 'add', MINUS: 'sub', MULTIPLY: 'mul', DIVIDE: 'div', POWER: 'pow' };
         const raw = field(block, 'OP', 'ADD');
