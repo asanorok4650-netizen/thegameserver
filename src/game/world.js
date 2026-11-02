@@ -51,7 +51,8 @@ export function buildSceneFromWorld(worldJson) {
       b.list.push({ matrix: mat, color: new THREE.Color(p.color) });
     }
 
-    ruleTriggers.push({ id: p.id, name: p.name, tags: [], pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2], size: [sx, sy, sz] });
+    const ruleTrigger = { id: p.id, name: p.name, tags: [], pos: pos.slice(), rot: m.slice(), half: [sx / 2, sy / 2, sz / 2], size: [sx, sy, sz] };
+    ruleTriggers.push(ruleTrigger);
     const behavior = resolveBehavior(p.attrs);
     const tags = Array.isArray(p.tags) ? p.tags.filter((tag) => typeof tag === 'string' && tag) : [];
     let trigger = null;
@@ -74,7 +75,7 @@ export function buildSceneFromWorld(worldJson) {
       stats.collidable++;
     }
     if (isMotion(behavior)) {
-      const entry = dynamics.add({ base: { pos: pos.slice(), rot: m.slice() }, behavior, item, trigger, size: [sx, sy, sz], id: p.id });
+      const entry = dynamics.add({ base: { pos: pos.slice(), rot: m.slice() }, behavior, item, trigger: ruleTrigger, size: [sx, sy, sz], id: p.id });
       pending.push(entry);
       stats.dynamic++;
     }
