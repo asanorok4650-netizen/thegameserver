@@ -81,7 +81,7 @@ export function buildSceneFromWorld(worldJson) {
       pending.push(entry);
       stats.dynamic++;
     }
-    partRecords.set(p.id, { id: p.id, name: p.name, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: t < 0.99, item, trigger: ruleTrigger, entry });
+    partRecords.set(p.id, { id: p.id, name: p.name, size: [sx, sy, sz], pos: pos.slice(), rot: m.slice(), visible: true, item, trigger: ruleTrigger, entry });
   }
 
   const group = new THREE.Group();
