@@ -240,6 +240,7 @@ export class Game {
     if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
       const active = new Set();
       for (const trigger of this.world.ruleTriggers) {
+        if (trigger.enabled === false) continue;
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
         if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger); }
