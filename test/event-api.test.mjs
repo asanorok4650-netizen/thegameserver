@@ -17,22 +17,28 @@ test('M1-E compiler emits event context expression IR', () => {
 });
 
 test('M1-E event context stays scoped to each asynchronous event task', () => {
-  const variables = [];
   const runtime = createScriptingRuntime({ version: 1, events: [
     { event: 'touch', target: 'door', body: [
       { op: 'wait', seconds: { op: 'number', value: 0.05 } },
       { op: 'setVariable', name: 'touchPlayer', value: { op: 'eventGet', property: 'playerId' } },
-      { op: 'setVariable', name: 'touchPart', value: { op: 'eventGet', property: 'partName' } },
-      { op: 'setVariable', name: 'touchType', value: { op: 'eventGet', property: 'eventType' } }
+      { op: 'setVariable', name: 'touchPart', value: { op: 'eventGet', property: 'partName' } }
+    ] },
+    { event: 'leave', target: 'door', body: [
+      { op: 'wait', seconds: { op: 'number', value: 0.05 } },
+      { op: 'setVariable', name: 'leavePlayer', value: { op: 'eventGet', property: 'playerId' } },
+      { op: 'setVariable', name: 'leavePart', value: { op: 'eventGet', property: 'partName' } },
+      { op: 'setVariable', name: 'leaveType', value: { op: 'eventGet', property: 'eventType' } }
     ] }
   ] });
   runtime.onTouch({ id: 'door', name: 'Door' }, 'local');
-  runtime.onTouch({ id: 'door', name: 'Door' }, 'player-2');
+  runtime.onLeave({ id: 'door', name: 'Door' }, 'player-2');
   for (let i = 0; i < 10; i++) runtime.update(0.02);
-  Object.assign(variables, runtime.getVariables());
-  assert.equal(variables.touchPlayer, 'player-2');
+  const variables = runtime.getVariables();
+  assert.equal(variables.touchPlayer, 'local');
   assert.equal(variables.touchPart, 'Door');
-  assert.equal(variables.touchType, 'touch');
+  assert.equal(variables.leavePlayer, 'player-2');
+  assert.equal(variables.leavePart, 'Door');
+  assert.equal(variables.leaveType, 'leave');
 });
 
 test('M1-E event context is empty for fields not supplied by the event', () => {
