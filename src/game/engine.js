@@ -319,6 +319,7 @@ export class Game {
   }
 
   dispose() {
+    this.scriptRuntime?.stop?.();
     this.renderer.setAnimationLoop(null);
     this.ro.disconnect();
     window.removeEventListener('keydown', this._onKey);
