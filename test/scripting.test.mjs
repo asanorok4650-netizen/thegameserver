@@ -195,3 +195,29 @@ test('runtime warns once for unknown instructions and sanitizes non-finite numbe
   assert.equal(runtime.getScore(), 0);
   assert.equal(warnings.filter((warning) => warning.includes('futureInstruction')).length, 1);
 });
+
+
+test('all toolbox value block families compile without errors', () => {
+  const number = (n) => ({ block: value('math_number', { NUM: n }) });
+  const score = (expression) => statement('rbxl_add_score', {}, { VALUE: { block: expression } });
+  const expressions = [
+    statement('rbxl_number', { VALUE: 2 }),
+    statement('math_arithmetic', { OP: 'MULTIPLY' }, { A: number(3), B: number(4) }),
+    statement('logic_compare', { OP: 'GTE' }, { A: number(4), B: number(2) }),
+    statement('logic_operation', { OP: 'AND' }, {
+      A: { block: value('logic_boolean', { BOOL: 'TRUE' }) },
+      B: { block: statement('logic_negate', {}, { BOOL: { block: value('logic_boolean', { BOOL: 'FALSE' }) } }) }
+    }),
+    statement('rbxl_compare', { OP: 'NEQ' }, { A: number(1), B: number(2) })
+  ];
+  let first = score(expressions[0]);
+  let tail = first;
+  for (const expression of expressions.slice(1)) {
+    const next = score(expression);
+    tail.next = { block: next };
+    tail = next;
+  }
+  const result = compileBlocklyWorkspace(start(first));
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.events[0].body.length, expressions.length);
+});
