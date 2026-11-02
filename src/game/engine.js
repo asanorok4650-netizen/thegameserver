@@ -238,20 +238,8 @@ export class Game {
     }
     this.activeTriggers = now;
     if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
-      const activeScripts = new Set();
-      for (const trigger of this.world.ruleTriggers) {
-        let touching = false;
-        for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
-        if (touching) {
-          activeScripts.add(trigger.id);
-          if (!this.activeScriptTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger);
-        }
-      }
-      this.activeScriptTriggers = activeScripts;
-    }
-    if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
       const active = new Set();
-      for (const trigger of this.ruleTriggerParts) {
+      for (const trigger of this.world.ruleTriggers) {
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
         if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger); }
