@@ -106,7 +106,7 @@ export class Game {
     this.logic = logic || null;
     this.logicHandlers = handlers;
     this.logicRuntime = createLogicRuntime(this.logic, {
-      respawn: () => this.respawn(),
+      respawn: (player = 'local') => this.respawn(player),
       setCheckpoint: (position) => { this.spawn = position.slice(); },
       complete: () => {
         this.completed = true;
