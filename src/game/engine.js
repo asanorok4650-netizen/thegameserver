@@ -247,7 +247,7 @@ export class Game {
     this.grounded = false;
     this.activeTriggers.clear();
     this.activeRuleTriggers.clear();
-    this.scriptRuntime?.onSpawn();
+    this.scriptRuntime?.onSpawn('local');
     return true;
   }
 
@@ -297,10 +297,10 @@ export class Game {
     if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
       const active = new Set();
       for (const trigger of this.world.ruleTriggers) {
-        if (trigger.enabled === false) { if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger); continue; }
+        if (trigger.enabled === false) { if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger, 'local'); continue; }
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
-        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger); }
+        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger, 'local'); }
         else if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger);
       }
       this.activeRuleTriggers = active;
