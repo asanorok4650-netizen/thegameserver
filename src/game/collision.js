@@ -101,6 +101,15 @@ export class CollisionWorld {
     for (let k = 0; k < 3; k++) { c.min[k] = c.pos[k] - e[k]; c.max[k] = c.pos[k] + e[k]; }
   }
 
+  remove(c) {
+    this.items = this.items.filter((item) => item !== c);
+    this.big = this.big.filter((item) => item !== c);
+    for (const [key, items] of this.grid) {
+      const next = items.filter((item) => item !== c);
+      if (next.length) this.grid.set(key, next); else this.grid.delete(key);
+    }
+  }
+
   add(c) {
     const p = c.pos;
     const e = CollisionWorld._extents(c);
