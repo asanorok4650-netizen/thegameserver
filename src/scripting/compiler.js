@@ -95,7 +95,10 @@ export function compileBlocklyWorkspace(workspace) {
       }
       case 'logic_negate': return { op: 'not', value: value(block, 'BOOL', depth, 'Boolean') };
       case 'logic_boolean': return { op: 'boolean', value: field(block, 'BOOL') === 'TRUE' };
-      case 'variables_get': return { op: 'variable', name: variableName(block) };
+      case 'variables_get': {
+        const name = variableName(block);
+        return { op: 'variable', name: name === 'value' ? 'score' : name };
+      }
       default:
         report('未対応の値ブロック: ' + String(block.type));
         return { op: 'number', value: 0 };
