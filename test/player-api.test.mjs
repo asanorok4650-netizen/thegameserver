@@ -65,6 +65,9 @@ test('Game player adapter clamps stats, validates IDs, handles death and respawn
   game.p = new THREE.Vector3(0, 5, 0);
   game.vel = new THREE.Vector3(1, 2, 3);
   game.grounded = true;
+  game.keys = new Set(['f']);
+  game.joy = { x: 1, y: 0 };
+  game.jumpHeld = true;
   game.spawn = [4, 8, 12];
   game.activeTriggers = new Set(['trigger']);
   game.activeRuleTriggers = new Set(['rule']);
@@ -85,6 +88,9 @@ test('Game player adapter clamps stats, validates IDs, handles death and respawn
   assert.equal(game.getPlayerProperty('local', 'health'), 0);
   assert.equal(game.getPlayerProperty('local', 'alive'), false);
   assert.deepEqual(game.vel.toArray(), [0, 0, 0]);
+  assert.equal(game.keys.size, 0);
+  assert.deepEqual(game.joy, { x: 0, y: 0 });
+  assert.equal(game.jumpHeld, false);
   assert.equal(game.healPlayer('local', 10), false);
   assert.equal(game.respawn('remote-1'), false);
   assert.equal(game.respawn('local'), true);
