@@ -135,6 +135,7 @@ export function buildSceneFromWorld(worldJson) {
     e.apply = (pose) => {
       record.pos = pose.pos.slice();
       record.rot = pose.rot.slice();
+      if (record.tagTrigger) { record.tagTrigger.pos = record.pos.slice(); record.tagTrigger.rot = record.rot.slice(); }
       applyPartMatrix(record);
     };
   }
