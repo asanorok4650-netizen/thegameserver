@@ -111,7 +111,8 @@ export default function GameView({ server, desc, playerName, onExit }) {
     API_NOT_CONFIGURED: 'サーバーAPIのURLが未設定です',
     room_not_configured: 'Workerにマルチプレイ(Durable Object)が設定されていません',
     not_found: 'ルームが見つかりません',
-    busy: 'ルームを作れませんでした。もう一度試してください'
+    busy: 'ルームを作れませんでした。もう一度試してください',
+    room_active: 'このネットワークからのルームがまだ残っています。終了してから作り直してください'
   };
   const NET_CLOSED = {
     'host-left': 'ホストが退出したため、ルームは終了しました',
@@ -126,7 +127,8 @@ export default function GameView({ server, desc, playerName, onExit }) {
     try {
       setNetMsg('接続中…');
       let code = joinCode.trim().toUpperCase();
-      if (create) code = (await createRoom(server.id)).roomId;
+      let token = '';
+      if (create) { const r = await createRoom(server.id); code = r.roomId; token = r.hostToken; }
       else {
         if (!ROOM_CODE_RE.test(code)) throw new Error('BAD_CODE');
         const info = await getRoomInfo(code);
@@ -135,9 +137,9 @@ export default function GameView({ server, desc, playerName, onExit }) {
         if (info.players >= info.max) throw new Error('FULL');
       }
       const s = new NetSession({
-        code, asHost: create, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
+        code, asHost: create, token, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
         getLocal: () => game.getNetState(),
-        getTime: () => game.time,
+        getTime: () => game.worldTime(),
         onStatus: (t) => setNetMsg(t),
         onReady: (sess) => {
           setNetRoom({ code, host: sess.isHost });
@@ -155,6 +157,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
       s.connect();
     } catch (e) {
       const m = String(e.message);
+      if (m === 'cooldown') { setNetMsg(`ルームを作り直せるまで、あと${e.retryAfter || 1}秒です`); return; }
       setNetMsg(m === 'BAD_CODE' ? 'コードは英数字6文字です' : m === 'OTHER_SERVER' ? '別のサーバーのルームです。そのサーバーを開いてから入力してください'
         : m === 'CLOSED' ? 'そのルームは終了しています' : m === 'FULL' ? 'ルームが満員です' : NET_ERRORS[m] || 'ルームに接続できませんでした');
     }

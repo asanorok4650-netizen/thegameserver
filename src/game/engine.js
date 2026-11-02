@@ -32,6 +32,7 @@ export class Game {
     this.rules = defaultRules();
     this.floor = null;
     this.time = 0; // 動くパーツ用の経過時間(秒)。世界の時計なので復活・やり直しでは戻さない
+    this.clockOrigin = performance.now(); // 世界時刻の起点。フレームのdtではなく実時間で数える(低FPS・クリア後・裏画面でも進む)
     this.setEnvironment(defaultEnvironment());
     this.remote = new RemotePlayers(this.scene); // マルチプレイ: 他プレイヤーの表示
     this.netClock = null; // マルチプレイ(クライアント): ホストの世界時刻(秒)を返す関数。null なら自分の時計だけ
@@ -194,6 +195,12 @@ export class Game {
   }
 
   /** マルチプレイで送る自分の状態: [x, y, z, 向き, 速さ, 接地] */
+  /** 世界時刻(秒)。マルチプレイのクライアントならホストの時刻、そうでなければこの端末の実時間 */
+  worldTime() {
+    const hostTime = this.netClock?.();
+    return hostTime != null ? hostTime : (performance.now() - this.clockOrigin) / 1000;
+  }
+
   getNetState() {
     return [this.p.x, this.p.y, this.p.z, this.heading, Math.hypot(this.vel.x, this.vel.z), this.grounded ? 1 : 0];
   }
@@ -317,12 +324,12 @@ export class Game {
 
   update(dt) {
     dt = Math.min(dt, 0.05);
-    if (this.completed) return;
-    this.time += dt;
-    const hostTime = this.netClock?.();
-    if (hostTime != null) { // ホストの時計になめらかに合わせる(動くパーツが全員で同じ位置になる)
-      if (Math.abs(hostTime - this.time) > 2) this.time = hostTime;
-      else this.time += (hostTime - this.time) * Math.min(1, dt * 2);
+    // 世界時刻: クライアントはホストの時刻、それ以外はこの端末の実時間。dtの丸めやクリア(completed)では止まらない
+    this.time = this.worldTime();
+    if (this.completed) {
+      // クリア後も動く床は動かし続ける(ホストがクリアしても、全員の世界時刻は止まらない)
+      if (this.world?.dynamics?.size) this.world.dynamics.step(this.time, null, null);
+      return;
     }
     if (!this.playerStats.alive) {
       this.vel.set(0, 0, 0);
