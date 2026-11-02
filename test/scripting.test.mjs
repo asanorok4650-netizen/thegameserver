@@ -221,3 +221,46 @@ test('all toolbox value block families compile without errors', () => {
   assert.deepEqual(result.errors, []);
   assert.equal(result.events[0].body.length, expressions.length);
 });
+
+
+test('all custom toolbox statement blocks compile to supported IR operations', () => {
+  const number = (n) => ({ block: value('rbxl_number', { VALUE: n }) });
+  const variable = { id: 'coins-id', name: 'coins' };
+  const blocks = [
+    statement('rbxl_wait', {}, { SECONDS: number(0.25) }),
+    statement('rbxl_if_else', {}, { CONDITION: bool(false), DO: { block: msg('yes') }, ELSE: { block: msg('no') } }),
+    statement('rbxl_repeat', { TIMES: 2 }, { DO: { block: msg('repeat') } }),
+    statement('rbxl_forever', {}, { DO: { block: msg('forever') } }),
+    statement('rbxl_add_score', {}, { VALUE: number(1) }),
+    msg('message'),
+    statement('rbxl_set_variable', { NAME: 'legacyCoins' }, { VALUE: number(2) }),
+    statement('rbxl_set_named_variable', { VAR: variable }, { VALUE: number(3) }),
+    statement('rbxl_change_variable', { VAR: variable }, { VALUE: number(1) }),
+    statement('rbxl_part_visible', { PART: 'Door', VISIBLE: false }),
+    statement('rbxl_move_part', { PART: 'Door', X: 1, Y: 2, Z: 3 }),
+    statement('rbxl_set_checkpoint'),
+    statement('rbxl_teleport', { PART: 'Spawn' }),
+    statement('rbxl_respawn'),
+    statement('rbxl_complete')
+  ];
+  for (let i = 0; i < blocks.length - 1; i++) blocks[i].next = { block: blocks[i + 1] };
+  const result = compileBlocklyWorkspace({
+    variables: [{ id: variable.id, name: variable.name }],
+    blocks: { blocks: [start(blocks[0]).blocks.blocks[0]] }
+  });
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.events[0].body.length, blocks.length);
+});
+
+test('all custom event roots compile to their expected event types', () => {
+  const roots = [
+    statement('rbxl_when_start'),
+    statement('rbxl_when_touch', { PART: 'Door' }),
+    statement('rbxl_when_leave', { PART: 'Door' }),
+    statement('rbxl_when_player_spawn'),
+    statement('rbxl_when_interval', { SECONDS: 2 })
+  ];
+  const result = compileBlocklyWorkspace({ blocks: { blocks: roots } });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.events.map((event) => event.event), ['start', 'touch', 'leave', 'spawn', 'interval']);
+});
