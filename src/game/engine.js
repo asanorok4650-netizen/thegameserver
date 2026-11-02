@@ -208,7 +208,7 @@ export class Game {
     if (property === 'health') {
       this.playerStats.health = Math.max(0, Math.min(this.playerStats.maxHealth, value));
       this.playerStats.alive = this.playerStats.health > 0;
-      if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; }
+      if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false; }
       return true;
     }
     if (property === 'walkSpeed') { this.playerStats.walkSpeed = Math.max(0, Math.min(200, value)); return true; }
@@ -228,7 +228,7 @@ export class Game {
     if (player !== 'local' || !this.playerStats.alive || !Number.isFinite(amount)) return false;
     this.playerStats.health = Math.max(0, this.playerStats.health - Math.max(0, amount));
     this.playerStats.alive = this.playerStats.health > 0;
-    if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; }
+    if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false; }
     return true;
   }
 
