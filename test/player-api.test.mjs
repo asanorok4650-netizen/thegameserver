@@ -11,12 +11,12 @@ const start = (first) => ({ blocks: { blocks: [statement('rbxl_when_start', {}, 
 
 test('M1-D compiler builds player get/set, damage, heal, teleport and respawn IR', () => {
   const blocks = [
-    statement('rbxl_player_set_health', { PLAYER: 'local', VALUE: 80 }),
+    statement('rbxl_player_set_health', { PLAYER: 'local' }, { VALUE: { block: value('math_number', { NUM: 80 }) } }),
     statement('rbxl_player_set_position', { PLAYER: 'local', X: 1, Y: 5, Z: 3 }),
-    statement('rbxl_player_set_walk_speed', { PLAYER: 'local', VALUE: 20 }),
-    statement('rbxl_player_set_jump_power', { PLAYER: 'local', VALUE: 15 }),
-    statement('rbxl_player_damage', { PLAYER: 'local', VALUE: 12 }),
-    statement('rbxl_player_heal', { PLAYER: 'local', VALUE: 5 }),
+    statement('rbxl_player_set_walk_speed', { PLAYER: 'local' }, { VALUE: { block: value('math_number', { NUM: 20 }) } }),
+    statement('rbxl_player_set_jump_power', { PLAYER: 'local' }, { VALUE: { block: value('math_number', { NUM: 15 }) } }),
+    statement('rbxl_player_damage', { PLAYER: 'local' }, { VALUE: { block: value('math_number', { NUM: 12 }) } }),
+    statement('rbxl_player_heal', { PLAYER: 'local' }, { VALUE: { block: value('math_number', { NUM: 5 }) } }),
     statement('rbxl_teleport', { PLAYER: 'local', PART: 'Spawn' }),
     statement('rbxl_respawn', { PLAYER: 'local' }),
     statement('rbxl_set_variable', { NAME: 'hp' }, { VALUE: { block: value('rbxl_player_get_number', { PLAYER: 'local', PROPERTY: 'health' }) } }),
