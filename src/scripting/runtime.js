@@ -33,6 +33,12 @@ export function createScriptingRuntime(program, api = {}) {
     if (node.op === 'boolean') return !!node.value;
     if (node.op === 'string') return String(node.value ?? '').slice(0, MAX_STRING_LENGTH);
     if (node.op === 'vector') return (node.values || []).slice(0, 3).map((item) => clamp(Number(read(item))));
+    if (node.op === 'playerGet') {
+      if (typeof api.getPlayerProperty !== 'function') { warnOnce('プレイヤー情報の取得APIが利用できません'); return node.property === 'alive' ? false : 0; }
+      const result = api.getPlayerProperty(node.player, node.property);
+      if (result === null || result === undefined) { warnOnce('プレイヤー情報を取得できません: ' + String(node.player).slice(0, 100)); return node.property === 'alive' ? false : 0; }
+      return cloneValue(result);
+    }
     if (node.op === 'partGet') {
       if (typeof api.getPartProperty !== 'function') { warnOnce('パーツ情報の取得APIが利用できません'); return 0; }
       const result = api.getPartProperty(node.part, node.property);
@@ -113,6 +119,21 @@ export function createScriptingRuntime(program, api = {}) {
         }
         case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
+        case 'playerSet': {
+          const accepted = api.setPlayerProperty?.(step.player, step.property, read(step.value));
+          if (!accepted) warnOnce('プレイヤーのプロパティを変更できません: ' + String(step.player).slice(0, 100) + ' (' + String(step.property).slice(0, 40) + ')');
+          yield 0; break;
+        }
+        case 'playerDamage': {
+          const accepted = api.damagePlayer?.(step.player, Math.max(0, Number(read(step.amount)) || 0));
+          if (!accepted) warnOnce('プレイヤーにダメージを適用できません: ' + String(step.player).slice(0, 100));
+          yield 0; break;
+        }
+        case 'playerHeal': {
+          const accepted = api.healPlayer?.(step.player, Math.max(0, Number(read(step.amount)) || 0));
+          if (!accepted) warnOnce('プレイヤーを回復できません: ' + String(step.player).slice(0, 100));
+          yield 0; break;
+        }
         case 'partSet':
           if (typeof api.setPartProperty === 'function') {
             const accepted = api.setPartProperty(step.part, step.property, read(step.value));
@@ -120,9 +141,9 @@ export function createScriptingRuntime(program, api = {}) {
           } else warnOnce('パーツのプロパティ設定APIが利用できません');
           yield 0; break;
         case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
-        case 'teleportToPart': api.teleportToPart?.(step.part); yield 0; break;
+        case 'teleportToPart': api.teleportToPart?.(step.part, step.player || 'local'); yield 0; break;
         case 'checkpointAtPart': api.checkpointAtPart?.(step.part); yield 0; break;
-        case 'respawn': api.respawn?.(); yield 0; break;
+        case 'respawn': api.respawn?.(step.player || 'local'); yield 0; break;
         case 'complete': stopped = true; api.complete?.(); return;
         default: warnOnce('未対応の処理命令をスキップしました: ' + String(step.op || 'unknown').slice(0, 80)); yield 0;
       }
