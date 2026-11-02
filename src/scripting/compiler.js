@@ -111,5 +111,5 @@ export function compileBlocklyWorkspace(workspace) {
   }
   if (count > MAX_BLOCKS) errors.push('ブロック数が上限2000個を超えています');
   if (errors.length) errors.splice(20);
-  return { version: 1, events, errors };
+  return { version: 1, variables: (workspace.variables || []).map((v) => ({ name: String(v.name || '').slice(0, 64), initial: 0 })), events, errors };
 }
