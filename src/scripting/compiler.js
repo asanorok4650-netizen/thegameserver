@@ -83,7 +83,7 @@ export function compileBlocklyWorkspace(workspace) {
       case 'rbxl_text_join': return { op: 'concat', a: value(block, 'A', depth, 'String'), b: value(block, 'B', depth, 'String') };
       case 'rbxl_random': return { op: 'random', min: value(block, 'MIN', depth), max: value(block, 'MAX', depth) };
       case 'rbxl_elapsed_time': return { op: 'elapsed' };
-      case 'rbxl_list_create': return { op: 'list', items: ['ADD0', 'ADD1', 'ADD2'].map((key) => value(block, key, depth, 'Any')) };
+      case 'rbxl_list_create': return { op: 'list', items: ['ADD0', 'ADD1', 'ADD2'].filter((key) => block.inputs?.[key]?.block).map((key) => value(block, key, depth, 'Any')) };
       case 'rbxl_list_length': return { op: 'listLength', list: value(block, 'LIST', depth, 'Array') };
       case 'rbxl_list_get': return { op: 'listGet', list: value(block, 'LIST', depth, 'Array'), index: value(block, 'INDEX', depth) };
       case 'math_modulo': return { op: 'math', operator: 'mod', a: value(block, 'DIVIDEND', depth), b: value(block, 'DIVISOR', depth) };
