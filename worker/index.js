@@ -8,7 +8,8 @@
 //   POST   /api/rooms              マルチプレイのルーム作成(body: {serverId})→ {roomId(6文字のコード)}
 //                                  同じIPから「同時に1ルーム」「終了後2分あける」(429 room_active / cooldown。合言葉つきなら制限なし)
 //   GET    /api/rooms/:code/info   ルームの情報 {serverId, status, players, max}
-//   GET    /api/rooms/:code/ws     WebSocket(シグナリング専用。ゲームのデータは流さない。進行役は &authority=1)
+//   GET    /api/rooms/:code/ws     WebSocket(シグナリングと世界時刻の基準だけ。ゲームのデータは流さない。ホストはいない)
+//                                  切れたあとの再接続は &id=<hello で教えた自分のid>&token=<hello で渡した token>
 // format は rbxl / rbxlx / tgw(.tgw はZIP。Workerは展開せず、R2に置いて配信するだけ)。
 // 合言葉は Authorization: Bearer <ADMIN_PASSPHRASE> で送る。
 
@@ -17,20 +18,11 @@ import { hashIp, acquireSlot, releaseSlot } from './room-limit.js';
 const MAX_BYTES = 100 * 1024 * 1024; // Workersのリクエスト上限(無料/Proプラン)に合わせる
 const FORMATS = ['rbxl', 'rbxlx', 'tgw'];
 
-// ── マルチプレイ(Hybrid P2P)。DOはRoomの状態とWebRTCのシグナリングだけを扱う ──
+// ── マルチプレイ(ホストレスP2P)。DOは参加者の名簿・WebRTCのシグナリング・世界時刻の基準だけを扱う ──
 const ROOM_MAX = 8;
-const RECONNECT_GRACE_MS = 30 * 1000;
-function newResumeToken() {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-}
-async function tokenHash(token) {
-  return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
-}
-
 const ROOM_TTL_MS = 60 * 60 * 1000;      // 参加者がいなければ1時間で片付ける
-const UNUSED_ROOM_MS = 60 * 1000;        // 作ったのにホストが来ないRoomは1分で片付ける
-const ROOM_CLOSED_KEEP_MS = 60 * 1000;
+const UNUSED_ROOM_MS = 60 * 1000;        // 作ったのに誰も来ないRoomは1分で片付ける
+const EMPTY_GRACE_MS = 45 * 1000;        // 全員のWebSocketが切れても、この間は再接続を待つ(P2Pは続いている)
 const MAX_SIGNAL_CHARS = 16384;          // シグナリング1メッセージの上限(SDP/ICE)
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32文字(I・Oなし)
 function newRoomCode() {
@@ -38,6 +30,8 @@ function newRoomCode() {
   return Array.from(b, (x) => ROOM_ALPHABET[x % ROOM_ALPHABET.length]).join('');
 }
 const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+const sha256hex = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(16)));
 function originAllowed(request, env) {
   const origin = request.headers.get('Origin');
   const list = (env.ALLOWED_ORIGIN || '*').split(',').map((x) => x.trim()).filter(Boolean);
@@ -235,225 +229,130 @@ export default {
   }
 };
 
-// 1 Room = 1 Durable Object。DOはRoomの存続・メンバー管理とWebRTCシグナリングを担当する。
-// Room作成者という所有者は存在しない。最初に接続したPeerがAuthorityになり、切断時は接続中Peerへ即時引き継ぐ。
+// 1 Room = 1 Durable Object。WebSocketは参加・退出の通知とSDP/ICEの中継、世界時刻の基準だけに使う(Hibernation APIなので待機中は課金されにくい)。
+// 位置などのゲームデータはWebRTC DataChannelで直接やり取りし、ここは通さない。ホストはいない(全員が対等)。
+// 状態: waiting(まだ誰も来ていない。1分で破棄) → running(誰かが入った) → 全員のWebSocketが切れて猶予(45秒)を過ぎたら破棄
+// 参加者は参加順の連番で 'p1' 'p2' … のidを受け取り、再接続用の token(Room側には sha256 だけを保存)も受け取る。
+// P2Pの接続は「先に入った人が、後から入った人へofferを出す」ので、Room は peer-join を既存の全員へ送る。
 export class Room {
   constructor(ctx, env) { this.ctx = ctx; this.env = env; }
+
   _byId(id) { return this.ctx.getWebSockets().find((ws) => ws.deserializeAttachment()?.id === id); }
   _res(obj, status) { return new Response(JSON.stringify(obj), { status: status || 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } }); }
-  _broadcast(message, exceptId) {
-    for (const ws of this.ctx.getWebSockets()) {
-      const peer = ws.deserializeAttachment();
-      if (peer && !peer.pendingResume && peer.id !== exceptId) { try { ws.send(JSON.stringify(message)); } catch { /* 接続終了中 */ } }
-    }
+  _live() { return this.ctx.getWebSockets().filter((ws) => { const a = ws.deserializeAttachment(); return a && !a.replaced; }); }
+  _members(exceptId) { // 参加順(idの連番)に並べる
+    return this._live().map((ws) => ws.deserializeAttachment()).filter((a) => a.id !== exceptId).map((a) => ({ id: a.id, name: a.name }))
+      .sort((x, y) => Number(x.id.slice(1)) - Number(y.id.slice(1)));
   }
+  _broadcast(msg, exceptId) {
+    const text = JSON.stringify(msg);
+    for (const ws of this._live()) if (ws.deserializeAttachment().id !== exceptId) { try { ws.send(text); } catch (e) { /* 閉じ済み */ } }
+  }
+
   async fetch(request) {
-    const st = this.ctx.storage, url = new URL(request.url);
+    const st = this.ctx.storage;
+    const url = new URL(request.url);
     if (url.pathname === '/init' && request.method === 'POST') {
       if (await st.get('serverId')) return this._res({ error: 'exists' }, 409);
       const b = await request.json();
-      await st.put({ serverId: b.serverId, code: b.code || '', ipHash: b.ipHash || '', status: 'waiting', authorityId: '', members: {}, createdAt: Date.now() });
-      await st.setAlarm(Date.now() + UNUSED_ROOM_MS);
+      await st.put({ serverId: b.serverId, code: b.code || '', ipHash: b.ipHash || '', status: 'waiting', createdAt: Date.now(), seq: 0 });
+      await st.setAlarm(Date.now() + UNUSED_ROOM_MS); // 誰も来なければ片付ける
       return this._res({ ok: true });
     }
     const serverId = await st.get('serverId');
     if (!serverId) return this._res({ error: 'not_found' }, 404);
     const status = await st.get('status');
+
     if (url.pathname.endsWith('/info')) {
-      return this._res({ serverId, status, players: this.ctx.getWebSockets().length, max: ROOM_MAX, authorityAvailable: this.ctx.getWebSockets().some((ws) => ws.deserializeAttachment()?.authority) });
+      return this._res({ serverId, status, players: this._live().length, max: ROOM_MAX });
     }
+
     if (url.pathname.endsWith('/ws')) {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
-      if (status === 'closed') return new Response('closed', { status: 410 });
-      if (url.searchParams.get('resume') === '1') return this._acceptResumeSocket();
-      if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
-      if (status === 'waiting') return new Response('no_authority', { status: 409 });
-      if (status !== 'running' && status !== 'waiting-authority') return new Response('closed', { status: 410 });
-      if (Object.keys((await st.get('members')) || {}).length >= ROOM_MAX) return new Response('full', { status: 409 });
-      const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
-      const promote = status === 'waiting-authority' && url.searchParams.get('former') !== '1';
-      const authorityId = promote ? id : await st.get('authorityId');
-      const pair = new WebSocketPair(), [client, server] = Object.values(pair);
+      const resumeId = url.searchParams.get('id');
+      if (resumeId) return this._acceptResume(url, st, resumeId);
+      if (this._live().length >= ROOM_MAX) return new Response('full', { status: 409 });
+      const seq = ((await st.get('seq')) || 0) + 1;
+      const id = 'p' + seq;
+      const name = cleanName(url.searchParams.get('name'));
+      const token = randomToken();
+      const peers = this._members(id);
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server);
-      const resumeToken = newResumeToken();
-      server.serializeAttachment({ id, name, authority: promote, resumeTokenHash: await tokenHash(resumeToken) });
-      const members = (await st.get('members')) || {};
-      members[id] = { id, name, authority: promote, tokenHash: await tokenHash(resumeToken), deadline: 0 };
-      await st.put({ seq, members, ...(promote ? { status: 'running', authorityId } : {}) });
-      const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
-      server.send(JSON.stringify({ t: 'hello', id, host: promote, authority: promote, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken, resumed: false, promoted: promote, peers }));
-      if (promote) this._broadcast({ t: 'authority-changed', id, name, previousId: '', previousName: '', peers }, id);
-      else this._broadcast({ t: 'peer-join', id, name }, id);
-      await this._scheduleAlarm();
+      server.serializeAttachment({ id, name });
+      await st.put({ seq, status: 'running', ['m:' + id]: { h: await sha256hex(token), name } });
+      await st.setAlarm(Date.now() + ROOM_TTL_MS);
+      server.send(JSON.stringify({ t: 'hello', id, token, peers, max: ROOM_MAX, resumed: false }));
+      this._broadcast({ t: 'peer-join', id, name }, id);
       return new Response(null, { status: 101, webSocket: client });
     }
     return this._res({ error: 'not_found' }, 404);
   }
-  // Room作成者ではなく、最初に接続したPeerがSimulation Authorityになり、切断時は別Peerへ即時に引き継ぐ。
-  async _acceptAuthority(url, st, status) {
-    if (status !== 'waiting') return new Response('authority_exists', { status: 409 });
-    if (await st.get('authorityId')) return new Response('authority_exists', { status: 409 });
-    if (this.ctx.getWebSockets().length >= ROOM_MAX) return new Response('full', { status: 409 });
-    const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
-    const pair = new WebSocketPair(), [client, server] = Object.values(pair);
+
+  // 切れたあとの再接続: hello で渡した token を持っている本人だけ。P2Pは続いているので、peer-join は送らない
+  async _acceptResume(url, st, id) {
+    const token = url.searchParams.get('token') || '';
+    const rec = /^p\d{1,9}$/.test(id) ? await st.get('m:' + id) : null;
+    if (!rec || !token || (await sha256hex(token)) !== rec.h) return new Response('forbidden', { status: 403 });
+    // 切れたことにまだ気づいていない古い接続があれば入れ替える(そのcloseは退出として扱わない)
+    const old = this._byId(id);
+    if (old) { try { old.serializeAttachment({ ...old.deserializeAttachment(), replaced: true }); old.close(4000, 'replaced'); } catch (e) { /* 閉じ済み */ } }
+    else if (this._live().length >= ROOM_MAX) return new Response('full', { status: 409 });
+    const pair = new WebSocketPair();
+    const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    const resumeToken = newResumeToken();
-    server.serializeAttachment({ id, name, authority: true, resumeTokenHash: await tokenHash(resumeToken) });
-    const members = (await st.get('members')) || {};
-    members[id] = { id, name, authority: true, tokenHash: await tokenHash(resumeToken), deadline: 0 };
-    await st.put({ status: 'running', authorityId: id, seq, members });
+    server.serializeAttachment({ id, name: rec.name });
+    await st.put('status', 'running');
     await st.setAlarm(Date.now() + ROOM_TTL_MS);
-    const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
-    server.send(JSON.stringify({ t: 'hello', id, host: true, authority: true, hostId: id, authorityId: id, max: ROOM_MAX, resumeToken, resumed: false, peers }));
+    server.send(JSON.stringify({ t: 'hello', id, peers: this._members(id), max: ROOM_MAX, resumed: true }));
     return new Response(null, { status: 101, webSocket: client });
   }
-  // 切断・明示退出したAuthorityを即時にメンバーから外し、接続中Peerへ権限を移す。
-  async _electAuthority(oldId, oldName = '') {
-    const st = this.ctx.storage;
-    const members = (await st.get('members')) || {};
-    delete members[oldId]; // 元Authorityのresume tokenは無効化し、復帰時は新規Peerとして扱う
-    const candidates = this.ctx.getWebSockets()
-      .map((ws) => ({ ws, peer: ws.deserializeAttachment() }))
-      .filter(({ peer }) => peer && !peer.pendingResume && peer.id !== oldId && members[peer.id])
-      .sort((a, b) => String(a.peer.id).localeCompare(String(b.peer.id), undefined, { numeric: true }));
-    if (!candidates.length) {
-      if (!Object.keys(members).length) { await st.put('members', members); await this._closeRoom(true); }
-      else { await st.put({ members, authorityId: '', status: 'waiting-authority' }); this._broadcast({ t: 'authority-unavailable', id: oldId, name: oldName }); await this._scheduleAlarm(); }
-      return;
-    }
-    const { ws, peer } = candidates[0];
-    peer.authority = true;
-    ws.serializeAttachment(peer);
-    members[peer.id] = { ...members[peer.id], authority: true, deadline: 0 };
-    await st.put({ members, authorityId: peer.id, status: 'running' });
-    const roster = this.ctx.getWebSockets().map((sock) => sock.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== peer.id).map((p) => ({ id: p.id, name: p.name }));
-    ws.send(JSON.stringify({ t: 'authority-elected', id: peer.id, name: peer.name, previousId: oldId, previousName: oldName, peers: roster }));
-    this._broadcast({ t: 'authority-changed', id: peer.id, name: peer.name, previousId: oldId, previousName: oldName, peers: roster }, peer.id);
-    await this._scheduleAlarm();
-  }
-  _acceptResumeSocket() {
-    const pair = new WebSocketPair(), [client, server] = Object.values(pair);
-    this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ pendingResume: true });
-    return new Response(null, { status: 101, webSocket: client });
-  }
-  async _scheduleAlarm() {
-    const st = this.ctx.storage, members = (await st.get('members')) || {};
-    const deadlines = Object.values(members).map((m) => m.deadline).filter((n) => n > 0);
-    await st.setAlarm(deadlines.length ? Math.min(...deadlines) : Date.now() + ROOM_TTL_MS);
-  }
+
+  // 受け付けるのは、SDP/ICEの中継(参加者どうし)と、世界時刻の問い合わせだけ
   async webSocketMessage(ws, message) {
     if (typeof message !== 'string' || message.length > MAX_SIGNAL_CHARS) return;
-    let m; try { m = JSON.parse(message); } catch { return; }
+    let m; try { m = JSON.parse(message); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
     const me = ws.deserializeAttachment();
-    if (!me) return;
-    if (me.pendingResume) {
-      if (m.t !== 'resume' || typeof m.token !== 'string' || !/^[a-f0-9]{64}$/.test(m.token)) {
-        try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'invalid-token' })); ws.close(1008, 'invalid resume'); } catch {}
-        return;
-      }
-      const members = (await this.ctx.storage.get('members')) || {};
-      const hash = await tokenHash(m.token);
-      const member = Object.values(members).find((p) => p.tokenHash === hash);
-      const currentSocket = member ? this._byId(member.id) : null;
-      // 旧Authorityのresume要求は、closeイベントとの競合や旧30秒猶予中でも必ず失効させる。
-      if (member?.authority && !currentSocket) {
-        delete members[member.id];
-        await this.ctx.storage.put('members', members);
-        await this._electAuthority(member.id, member.name);
-        try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'authority-role-revoked' })); ws.close(1008, 'authority role revoked'); } catch {}
-        return;
-      }
-      if (!member || !member.deadline || member.deadline < Date.now() || currentSocket) {
-        try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'expired-or-connected' })); ws.close(1008, 'resume rejected'); } catch {}
-        return;
-      }
-      member.deadline = 0;
-      const promote = !member.authority && !(await this.ctx.storage.get('authorityId')) && (await this.ctx.storage.get('status')) === 'waiting-authority';
-      if (promote) member.authority = true;
-      members[member.id] = member;
-      ws.serializeAttachment({ id: member.id, name: member.name, authority: member.authority, resumeTokenHash: hash });
-      await this.ctx.storage.put({ members, ...(member.authority ? { status: 'running', authorityId: member.id } : {}) });
-      const active = this.ctx.getWebSockets().map((sock) => sock.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== member.id);
-      const authorityId = await this.ctx.storage.get('authorityId');
-      ws.send(JSON.stringify({ t: 'hello', id: member.id, name: member.name, authority: member.authority, host: member.authority, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken: m.token, resumed: true, peers: active.map((p) => ({ id: p.id, name: p.name })) }));
-      if (promote) this._broadcast({ t: 'authority-changed', id: member.id, name: member.name, previousId: '', previousName: '', peers: active.map((p) => ({ id: p.id, name: p.name })) }, member.id);
-      else if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
-      else this._broadcast({ t: 'peer-resume', id: member.id, name: member.name }, member.id);
-      await this._scheduleAlarm();
+    if (!me || me.replaced) return;
+    if (m.t === 'time') {
+      // 世界時刻 = Room を作ってからの経過秒。参加者が往復時間から自分の時計とのずれを計算する
+      if (typeof m.c !== 'number' || !Number.isFinite(m.c)) return;
+      const created = (await this.ctx.storage.get('createdAt')) || Date.now();
+      try { ws.send(JSON.stringify({ t: 'time', c: m.c, s: (Date.now() - created) / 1000 })); } catch (e) { /* 閉じ済み */ }
       return;
     }
-    if (m.t === 'leave') {
-      ws.serializeAttachment({ ...me, intentional: true });
-      const st = this.ctx.storage, members = (await st.get('members')) || {};
-      delete members[me.id];
-      if (me.authority && (await st.get('authorityId')) === me.id) {
-        await st.put('members', members);
-        try { ws.close(1000, 'left'); } catch {}
-        await this._electAuthority(me.id, me.name);
-      } else {
-        await st.put('members', members);
-        this._broadcast({ t: 'peer-leave', id: me.id }, me.id);
-        try { ws.close(1000, 'left'); } catch {}
-        if (Object.keys(members).length === 0) await this._closeRoom(true);
-        else await this._scheduleAlarm();
-      }
-      return;
-    }
-    if (m.t !== 'signal' || typeof m.to !== 'string') return;
-    const target = this._byId(m.to), other = target?.deserializeAttachment();
-    if (!other || (!me.authority && !other.authority)) return;
-    target.send(JSON.stringify({ t: 'signal', from: me.id, data: m.data }));
+    if (m.t !== 'signal' || typeof m.to !== 'string' || m.to === me.id) return;
+    const target = this._byId(m.to);
+    if (!target || target.deserializeAttachment()?.replaced) return;
+    try { target.send(JSON.stringify({ t: 'signal', from: me.id, data: m.data })); } catch (e) { /* 閉じ済み */ }
   }
+
   async webSocketClose(ws, code) {
     const me = ws.deserializeAttachment();
-    try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'closed'); } catch {}
-    if (!me || me.replaced || me.intentional || (await this.ctx.storage.get('status')) === 'closed') return;
-    const st = this.ctx.storage, members = (await st.get('members')) || {}, member = members[me.id];
-    if (!member) return;
-    if (me.authority && (await st.get('authorityId')) === me.id) {
-      await this._electAuthority(me.id, me.name);
-      return;
+    try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'closed'); } catch (e) { /* 閉じ済み */ }
+    if (!me || me.replaced) return;
+    this._broadcast({ t: 'peer-leave', id: me.id }, me.id); // P2P未成立の後始末用(成立済みの相手はP2P側で切れを検出する)
+    // 全員いなくなったら、猶予のあいだ再接続を待つ(P2Pは続いていて、みんなが一斉に切れただけかもしれない)
+    if (this._members(me.id).length === 0 && (await this.ctx.storage.get('status')) === 'running') {
+      await this.ctx.storage.setAlarm(Date.now() + EMPTY_GRACE_MS);
     }
-    member.deadline = Date.now() + RECONNECT_GRACE_MS;
-    members[me.id] = member;
-    await st.put('members', members);
-    this._broadcast({ t: 'peer-disconnected', id: me.id, deadline: member.deadline }, me.id);
-    await this._scheduleAlarm();
   }
+
   async webSocketError(ws) { await this.webSocketClose(ws, 1011); }
-  // 全Peer退出時だけRoomを終了し、作成制限の枠を返す。
-  async _closeRoom(cooldown) {
-    const st = this.ctx.storage;
-    if ((await st.get('status')) === 'closed') return;
-    await st.put({ status: 'closed', authorityId: '' });
-    for (const ws of this.ctx.getWebSockets()) {
-      try { ws.send(JSON.stringify({ t: 'closed', reason: 'room-empty' })); ws.close(1000, 'room-empty'); } catch { /* 無視 */ }
-    }
-    await st.setAlarm(Date.now() + ROOM_CLOSED_KEEP_MS);
-    await this._release(cooldown);
-  }
+
   async _release(cooldown) {
     const st = this.ctx.storage;
     await releaseSlot(this.env, await st.get('ipHash'), await st.get('code'), cooldown ? Date.now() : null);
   }
+
+  // 期限切れ・誰も来なかった・全員が戻らなかったRoomを片付ける(ゲームループや生存監視には使わない)
   async alarm() {
-    const st = this.ctx.storage, status = await st.get('status');
-    if (status === 'closed') { await st.deleteAll(); return; }
-    if (status === 'waiting') { await this._release(false); await st.deleteAll(); return; }
-    const members = (await st.get('members')) || {}, now = Date.now();
-    let expiredAuthority = null;
-    for (const member of Object.values(members)) {
-      if (member.deadline && member.deadline <= now) {
-        delete members[member.id];
-        if (member.authority && (await st.get('authorityId')) === member.id) expiredAuthority = member;
-        else this._broadcast({ t: 'peer-leave', id: member.id });
-      }
-    }
-    await st.put('members', members);
-    if (expiredAuthority) { await this._electAuthority(expiredAuthority.id, expiredAuthority.name); return; }
-    if (Object.keys(members).length === 0 && this.ctx.getWebSockets().length === 0) { await this._closeRoom(true); return; }
-    await this._scheduleAlarm();
+    const st = this.ctx.storage;
+    const status = await st.get('status');
+    if (status === 'waiting') { await this._release(false); await st.deleteAll(); return; } // 誰も来なかった(クールダウンなし)
+    if (this._live().length === 0) { await this._release(true); await st.deleteAll(); return; }
+    await st.setAlarm(Date.now() + ROOM_TTL_MS);
   }
 }
