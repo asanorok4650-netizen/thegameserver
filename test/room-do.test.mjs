@@ -283,6 +283,20 @@ const connect = async (room, q) => {
   assert.deepEqual(snapshots.at(-1), []);
 }
 
+
+// 元Authorityのresume拒否後、Sessionは通常Peerとして再参加する
+{
+  const session = new NetSession({ asAuthority: true });
+  let reopened = false;
+  session.reconnecting = true; session.resumeToken = 'a'.repeat(64);
+  session._openWs = () => { reopened = true; };
+  session._onWs(JSON.stringify({ t: 'resume-error', reason: 'authority-role-revoked' }));
+  assert.equal(reopened, true);
+  assert.equal(session.o.asAuthority, false);
+  assert.equal(session.formerAuthority, true);
+  assert.equal(session.resumeToken, '');
+}
+
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
 {
   const { ctx, room } = await newRoom();
