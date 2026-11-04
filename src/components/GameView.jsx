@@ -253,7 +253,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
               <div className="net-label">ルームコード</div>
               <div className="net-code">{netRoom.code}</div>
               <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.authority && p.id === sessionRef.current?.id ? '(進行役)' : ''}</li>)}</ul>
-              {netRoom.authority && <div className="net-note">あなたはゲーム進行役です。退出後も他の参加者のRoomは維持されます</div>}
+              {netRoom.authority && <div className="net-note">あなたはゲーム進行役です。切断時は接続中の参加者へ自動で引き継がれます</div>}
               <button className="net-btn net-leave" onClick={leaveRoom}>ルームを出る</button>
             </>
           )}
