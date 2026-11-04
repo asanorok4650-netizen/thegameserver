@@ -82,27 +82,23 @@ const connect = async (room, q) => {
   assert.equal((await connect(room, 'name=Taro')).status, 409);
 }
 
-// 3) Authorityの一時切断は30秒予約され、同じID・権限で復帰できる
+// 3) Authority切断時に接続中Peerへ即時引き継ぎ、元Authorityのtokenを無効化
 {
   const { ctx, room } = await newRoom();
   await connect(room, 'authority=1&name=Creator');
   await connect(room, 'name=A');
-  const [authority, a] = ctx.sockets;
-  const token = authority.last('hello').resumeToken;
+  await connect(room, 'name=B');
+  const [authority, a, b] = ctx.sockets;
+  const oldToken = authority.last('hello').resumeToken;
   await room.webSocketClose(authority, 1006);
-  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
-  assert.equal(await ctx.storage.get('authorityId'), 'p1', 'Authority identity is reserved during grace');
-  assert.equal(a.last('authority-disconnected').id, 'p1');
-  assert.equal((await room.fetch(req('/info'))).status, 200);
-  assert.equal((await connect(room, 'name=Late')).status, 409, 'new joins wait during authority grace');
-  const resumed = await connect(room, 'resume=' + token);
-  assert.equal(resumed.status, 101);
-  const replacement = ctx.sockets.at(-1);
-  assert.equal(replacement.last('hello').id, 'p1');
-  assert.equal(replacement.last('hello').authority, true);
-  assert.equal(replacement.last('hello').resumed, true);
   assert.equal(await ctx.storage.get('status'), 'running');
-  assert.equal(a.last('authority-resume').id, 'p1');
+  assert.equal(await ctx.storage.get('authorityId'), 'p2');
+  assert.equal((await ctx.storage.get('members')).p1, undefined);
+  assert.equal((await ctx.storage.get('members')).p2.authority, true);
+  assert.equal(a.last('authority-changed').id, 'p2');
+  assert.equal(b.last('authority-elected').id, 'p2');
+  await connect(room, 'resume=' + oldToken);
+  assert.equal(ctx.sockets.at(-1).closed?.code, 1008);
 }
 
 // 4) 明示退出は即時削除し、最後の退出でRoomを終了する
@@ -165,7 +161,7 @@ const connect = async (room, q) => {
   assert.equal(ctx.sockets[0].last('peer-leave').id, 'p2');
 }
 
-// Authorityの明示退出は即時に権限を解放するが、残りPeerのRoomは維持する
+// Authorityの明示退出でも残りPeerへ即時に引き継ぐ
 {
   const { ctx, room } = await newRoom();
   await connect(room, 'authority=1&name=Creator');
@@ -173,9 +169,10 @@ const connect = async (room, q) => {
   const [authority, peer] = ctx.sockets;
   await room.webSocketMessage(authority, JSON.stringify({ t: 'leave' }));
   assert.equal((await ctx.storage.get('members')).p1, undefined);
-  assert.equal(await ctx.storage.get('authorityId'), '');
-  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
-  assert.equal(peer.last('authority-left').id, 'p1');
+  assert.equal((await ctx.storage.get('members')).p2.authority, true);
+  assert.equal(await ctx.storage.get('authorityId'), 'p2');
+  assert.equal(await ctx.storage.get('status'), 'running');
+  assert.equal(peer.last('authority-elected').id, 'p2');
 }
 
 // 無効な再接続トークンは拒否する
@@ -186,21 +183,17 @@ const connect = async (room, q) => {
   assert.equal(room.ctx.sockets.at(-1).closed?.code, 1008);
 }
 
-// Authorityの30秒猶予が切れたら、権限予約を削除してwaiting-authorityになる
+// Authorityは30秒猶予を持たず、切断直後に次のPeerへ移行する
 {
   const { ctx, room } = await newRoom();
   await connect(room, 'authority=1&name=Creator');
   await connect(room, 'name=A');
   const [authority, peer] = ctx.sockets;
   await room.webSocketClose(authority, 1006);
-  const members = await ctx.storage.get('members');
-  members.p1.deadline = 1;
-  await ctx.storage.put('members', members);
-  await room.alarm();
   assert.equal((await ctx.storage.get('members')).p1, undefined);
-  assert.equal(await ctx.storage.get('authorityId'), '');
-  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
-  assert.equal(peer.last('authority-left').id, 'p1');
+  assert.equal(await ctx.storage.get('authorityId'), 'p2');
+  assert.equal(await ctx.storage.get('status'), 'running');
+  assert.equal(peer.last('authority-changed').id, 'p2');
 }
 
 // Authority側のP2Pオブジェクトが先に消えていても、猶予終了通知でプレイヤーを削除する
