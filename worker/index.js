@@ -391,7 +391,6 @@ export class Room {
         else await this._scheduleAlarm();
       }
       return;
-      return;
     }
     if (m.t !== 'signal' || typeof m.to !== 'string') return;
     const target = this._byId(m.to), other = target?.deserializeAttachment();
@@ -435,16 +434,16 @@ export class Room {
     if (status === 'closed') { await st.deleteAll(); return; }
     if (status === 'waiting') { await this._release(false); await st.deleteAll(); return; }
     const members = (await st.get('members')) || {}, now = Date.now();
+    let expiredAuthority = null;
     for (const member of Object.values(members)) {
       if (member.deadline && member.deadline <= now) {
         delete members[member.id];
-        if (member.authority && (await st.get('authorityId')) === member.id) {
-          await st.put({ authorityId: '', status: 'waiting-authority' });
-          this._broadcast({ t: 'authority-left', id: member.id });
-        } else this._broadcast({ t: 'peer-leave', id: member.id });
+        if (member.authority && (await st.get('authorityId')) === member.id) expiredAuthority = member;
+        else this._broadcast({ t: 'peer-leave', id: member.id });
       }
     }
     await st.put('members', members);
+    if (expiredAuthority) { await this._electAuthority(expiredAuthority.id, expiredAuthority.name); return; }
     if (Object.keys(members).length === 0 && this.ctx.getWebSockets().length === 0) { await this._closeRoom(true); return; }
     await this._scheduleAlarm();
   }
