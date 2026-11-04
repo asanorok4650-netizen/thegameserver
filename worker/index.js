@@ -5,10 +5,10 @@
 //   POST   /api/servers?name=&description=&format=   追加(要合言葉。ボディにファイルそのもの)
 //   PUT    /api/servers/:id?name=&description=&format=  同じidのまま差し替え(要合言葉。Studioの上書き公開用)
 //   DELETE /api/servers/:id        削除(要合言葉)
-//   POST   /api/rooms              マルチプレイのルーム作成(body: {serverId})→ {roomId(6文字のコード), hostToken(ホストの再接続用。作った人だけが持つ)}
+//   POST   /api/rooms              マルチプレイのルーム作成(body: {serverId})→ {roomId(6文字のコード)}
 //                                  同じIPから「同時に1ルーム」「終了後2分あける」(429 room_active / cooldown。合言葉つきなら制限なし)
 //   GET    /api/rooms/:code/info   ルームの情報 {serverId, status, players, max}
-//   GET    /api/rooms/:code/ws     WebSocket(シグナリング専用。ゲームのデータは流さない。ホストは &host=1&token=<hostToken>)
+//   GET    /api/rooms/:code/ws     WebSocket(シグナリング専用。ゲームのデータは流さない。進行役は &authority=1)
 // format は rbxl / rbxlx / tgw(.tgw はZIP。Workerは展開せず、R2に置いて配信するだけ)。
 // 合言葉は Authorization: Bearer <ADMIN_PASSPHRASE> で送る。
 
@@ -21,7 +21,6 @@ const FORMATS = ['rbxl', 'rbxlx', 'tgw'];
 const ROOM_MAX = 8;
 const ROOM_TTL_MS = 60 * 60 * 1000;      // 参加者がいなければ1時間で片付ける
 const UNUSED_ROOM_MS = 60 * 1000;        // 作ったのにホストが来ないRoomは1分で片付ける
-const HOST_GRACE_MS = 45 * 1000;         // ホストのWebSocketが切れても、この間は再接続を待つ(P2Pは続いている)
 const ROOM_CLOSED_KEEP_MS = 60 * 1000;
 const MAX_SIGNAL_CHARS = 16384;          // シグナリング1メッセージの上限(SDP/ICE)
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32文字(I・Oなし)
@@ -30,8 +29,6 @@ function newRoomCode() {
   return Array.from(b, (x) => ROOM_ALPHABET[x % ROOM_ALPHABET.length]).join('');
 }
 const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
-const sha256hex = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
-const randomToken = () => hex(crypto.getRandomValues(new Uint8Array(16)));
 function originAllowed(request, env) {
   const origin = request.headers.get('Origin');
   const list = (env.ALLOWED_ORIGIN || '*').split(',').map((x) => x.trim()).filter(Boolean);
@@ -116,16 +113,15 @@ export default {
             limited = true;
           } catch (e) { console.warn('room_limits unavailable: ' + String((e && e.message) || e)); }
         }
-        const hostToken = randomToken();
         const res = await env.ROOM.get(env.ROOM.idFromName(code)).fetch('https://room/init', {
           method: 'POST',
-          body: JSON.stringify({ serverId, code, hostTokenHash: await sha256hex(hostToken), ipHash: limited ? ipHash : '' })
+          body: JSON.stringify({ serverId, code, ipHash: limited ? ipHash : '' })
         });
         if (!res.ok) {
           if (limited) await releaseSlot(env, ipHash, code, null);
           return json({ error: 'busy' }, 503, h);
         }
-        return json({ roomId: code, hostToken }, 201, h);
+        return json({ roomId: code }, 201, h);
       }
 
       const rm = path.match(/^\/api\/rooms\/([A-Z2-9]{6})\/(ws|info)$/);
@@ -230,145 +226,119 @@ export default {
   }
 };
 
-// 1 Room = 1 Durable Object。WebSocketは参加・退出の通知とSDP/ICEの中継だけに使う(Hibernation APIなので待機中は課金されにくい)。
-// 位置・入力などのゲームデータはWebRTC DataChannelで直接やり取りし、ここは通さない。
-// 状態: waiting(ホスト待ち) → running → host-away(ホストのWebSocketだけ切れた。猶予つき) → running / closed
-// ホストが明示的に抜ける('close'を送る)・猶予切れ・期限切れでRoom終了。ホスト交代はなし。
+// 1 Room = 1 Durable Object。DOはRoomの存続・メンバー管理とWebRTCシグナリングを担当する。
+// Room作成者という所有者は存在しない。最初に接続したPeerがゲーム進行役(暫定Authority)になる。
+// Authority退出後も他のPeerが残っていればRoomを維持する。Authorityの自動引き継ぎは後続段階で実装する。
 export class Room {
   constructor(ctx, env) { this.ctx = ctx; this.env = env; }
-
   _byId(id) { return this.ctx.getWebSockets().find((ws) => ws.deserializeAttachment()?.id === id); }
   _res(obj, status) { return new Response(JSON.stringify(obj), { status: status || 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } }); }
-
+  _broadcast(message, exceptId) {
+    for (const ws of this.ctx.getWebSockets()) {
+      const peer = ws.deserializeAttachment();
+      if (peer && peer.id !== exceptId) { try { ws.send(JSON.stringify(message)); } catch { /* 接続終了中 */ } }
+    }
+  }
   async fetch(request) {
-    const st = this.ctx.storage;
-    const url = new URL(request.url);
+    const st = this.ctx.storage, url = new URL(request.url);
     if (url.pathname === '/init' && request.method === 'POST') {
       if (await st.get('serverId')) return this._res({ error: 'exists' }, 409);
       const b = await request.json();
-      await st.put({ serverId: b.serverId, code: b.code || '', hostTokenHash: b.hostTokenHash || '', ipHash: b.ipHash || '', status: 'waiting', createdAt: Date.now() });
-      await st.setAlarm(Date.now() + UNUSED_ROOM_MS); // ホストが来なければ片付ける
+      await st.put({ serverId: b.serverId, code: b.code || '', ipHash: b.ipHash || '', status: 'waiting', authorityId: '', createdAt: Date.now() });
+      await st.setAlarm(Date.now() + UNUSED_ROOM_MS);
       return this._res({ ok: true });
     }
     const serverId = await st.get('serverId');
     if (!serverId) return this._res({ error: 'not_found' }, 404);
     const status = await st.get('status');
-
     if (url.pathname.endsWith('/info')) {
-      return this._res({ serverId, status, players: this.ctx.getWebSockets().length, max: ROOM_MAX });
+      return this._res({ serverId, status, players: this.ctx.getWebSockets().length, max: ROOM_MAX, authorityAvailable: !!(await st.get('authorityId')) });
     }
-
     if (url.pathname.endsWith('/ws')) {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
       if (status === 'closed') return new Response('closed', { status: 410 });
-      if (url.searchParams.get('host') === '1') return this._acceptHost(url, st, status);
-      // 参加者: ホストが接続中のときだけ入れる(ホストが不在の間はシグナリングを返せない)
-      if (status === 'host-away') return new Response('host_away', { status: 409 });
-      if (status !== 'running') return new Response('no_host', { status: 409 });
+      if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
+      if (status === 'waiting') return new Response('no_authority', { status: 409 });
+      if (status === 'waiting-authority') return new Response('authority_unavailable', { status: 409 });
+      if (status !== 'running') return new Response('closed', { status: 410 });
       if (this.ctx.getWebSockets().length >= ROOM_MAX) return new Response('full', { status: 409 });
-      const hostId = await st.get('hostId');
-      const seq = ((await st.get('seq')) || 0) + 1;
-      const id = 'p' + seq;
-      const name = cleanName(url.searchParams.get('name'));
-      const pair = new WebSocketPair();
-      const [client, server] = Object.values(pair);
+      const authorityId = await st.get('authorityId');
+      const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
+      const pair = new WebSocketPair(), [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id, name, host: false });
+      server.serializeAttachment({ id, name, authority: false });
       await st.put('seq', seq);
-      server.send(JSON.stringify({ t: 'hello', id, host: false, hostId, max: ROOM_MAX }));
-      this._byId(hostId)?.send(JSON.stringify({ t: 'peer-join', id, name }));
+      const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
+      server.send(JSON.stringify({ t: 'hello', id, host: false, authorityId, hostId: authorityId, max: ROOM_MAX, peers }));
+      this._broadcast({ t: 'peer-join', id, name }, id);
+      await st.setAlarm(Date.now() + ROOM_TTL_MS);
       return new Response(null, { status: 101, webSocket: client });
     }
     return this._res({ error: 'not_found' }, 404);
   }
-
-  // ホスト: 最初の接続(waiting)と、切れたあとの再接続(running / host-away)。hostToken が合う人だけ
-  async _acceptHost(url, st, status) {
-    const token = url.searchParams.get('token') || '';
-    if (!token || (await sha256hex(token)) !== (await st.get('hostTokenHash'))) return new Response('forbidden', { status: 403 });
-    const resumed = status !== 'waiting';
-    let hostId = await st.get('hostId');
-    let seq = (await st.get('seq')) || 0;
-    if (!resumed) { hostId = 'p' + (++seq); }
-    // 切れたことにまだ気づいていない古い接続があれば入れ替える(そのcloseはホストの退出として扱わない)
-    const old = resumed ? this._byId(hostId) : null;
-    if (old) { try { old.serializeAttachment({ ...old.deserializeAttachment(), replaced: true }); old.close(4000, 'replaced'); } catch (e) { /* 閉じ済み */ } }
-    const name = cleanName(url.searchParams.get('name'));
-    const pair = new WebSocketPair();
-    const [client, server] = Object.values(pair);
+  // Room作成者ではなく、最初に接続したPeerが暫定Simulation Authorityになる。
+  async _acceptAuthority(url, st, status) {
+    if (status !== 'waiting') return new Response('authority_exists', { status: 409 });
+    if (await st.get('authorityId')) return new Response('authority_exists', { status: 409 });
+    if (this.ctx.getWebSockets().length >= ROOM_MAX) return new Response('full', { status: 409 });
+    const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
+    const pair = new WebSocketPair(), [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ id: hostId, name, host: true });
-    await st.put({ status: 'running', hostId, seq });
+    server.serializeAttachment({ id, name, authority: true });
+    await st.put({ status: 'running', authorityId: id, seq });
     await st.setAlarm(Date.now() + ROOM_TTL_MS);
-    const peers = this.ctx.getWebSockets().map((w) => w.deserializeAttachment()).filter((a) => a && !a.host && !a.replaced).map((a) => ({ id: a.id, name: a.name }));
-    server.send(JSON.stringify({ t: 'hello', id: hostId, host: true, hostId, max: ROOM_MAX, resumed, peers }));
+    const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
+    server.send(JSON.stringify({ t: 'hello', id, host: true, authority: true, hostId: id, authorityId: id, max: ROOM_MAX, resumed: false, peers }));
     return new Response(null, { status: 101, webSocket: client });
   }
-
-  // シグナリング: ホスト⇔クライアントだけ中継する(Star型。クライアント同士は繋がない)
+  // WebRTCシグナリングは暫定Authorityと各Peerの間だけを中継する。
   async webSocketMessage(ws, message) {
     if (typeof message !== 'string' || message.length > MAX_SIGNAL_CHARS) return;
-    let m; try { m = JSON.parse(message); } catch (e) { return; }
+    let m; try { m = JSON.parse(message); } catch { return; }
     if (!m || typeof m !== 'object') return;
     const me = ws.deserializeAttachment();
-    if (!me) return;
-    if (m.t === 'close') { if (me.host) await this._closeRoom(true); return; } // ホストが自分から抜けた
-    if (m.t !== 'signal' || typeof m.to !== 'string') return;
-    const target = this._byId(m.to);
-    const other = target?.deserializeAttachment();
-    if (!other || (!me.host && !other.host)) return;
+    if (!me || m.t !== 'signal' || typeof m.to !== 'string') return;
+    const target = this._byId(m.to), other = target?.deserializeAttachment();
+    if (!other || (!me.authority && !other.authority)) return;
     target.send(JSON.stringify({ t: 'signal', from: me.id, data: m.data }));
   }
-
   async webSocketClose(ws, code) {
     const me = ws.deserializeAttachment();
-    try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'closed'); } catch (e) { /* 閉じ済み */ }
-    if (!me || me.replaced) return;
+    try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'closed'); } catch { /* 閉じ済み */ }
+    if (!me || me.replaced || (await this.ctx.storage.get('status')) === 'closed') return;
     const st = this.ctx.storage;
-    const status = await st.get('status');
-    if (status === 'closed') return;
-    if (me.host) {
-      // 突然切れた: すぐには終わらせず、猶予のあいだホストの再接続を待つ(参加者のP2Pはそのまま続く)
-      if (status !== 'running') return;
-      const graceUntil = Date.now() + HOST_GRACE_MS;
-      await st.put({ status: 'host-away', graceUntil });
-      await st.setAlarm(graceUntil);
+    if (me.authority) {
+      if ((await st.get('authorityId')) === me.id) {
+        await st.put({ authorityId: '', status: 'waiting-authority' });
+        this._broadcast({ t: 'authority-left', id: me.id });
+      }
     } else {
-      this._byId(await st.get('hostId'))?.send(JSON.stringify({ t: 'peer-leave', id: me.id }));
+      this._broadcast({ t: 'peer-leave', id: me.id }, me.id);
     }
+    if (this.ctx.getWebSockets().length === 0) await this._closeRoom(true);
+    else await st.setAlarm(Date.now() + ROOM_TTL_MS);
   }
-
   async webSocketError(ws) { await this.webSocketClose(ws, 1011); }
-
-  // Room終了: 全員に知らせて閉じ、作成制限の枠を返す(cooldown=true なら、ここから2分のクールダウンが始まる)
+  // 全Peer退出時だけRoomを終了し、作成制限の枠を返す。
   async _closeRoom(cooldown) {
     const st = this.ctx.storage;
     if ((await st.get('status')) === 'closed') return;
-    await st.put('status', 'closed');
-    for (const w of this.ctx.getWebSockets()) {
-      try { w.send(JSON.stringify({ t: 'closed', reason: 'host-left' })); w.close(1000, 'host-left'); } catch (e) { /* 無視 */ }
+    await st.put({ status: 'closed', authorityId: '' });
+    for (const ws of this.ctx.getWebSockets()) {
+      try { ws.send(JSON.stringify({ t: 'closed', reason: 'room-empty' })); ws.close(1000, 'room-empty'); } catch { /* 無視 */ }
     }
     await st.setAlarm(Date.now() + ROOM_CLOSED_KEEP_MS);
     await this._release(cooldown);
   }
-
   async _release(cooldown) {
     const st = this.ctx.storage;
     await releaseSlot(this.env, await st.get('ipHash'), await st.get('code'), cooldown ? Date.now() : null);
   }
-
-  // 期限切れ・終了済み・ホスト不在の猶予切れを片付ける(ゲームループや生存監視には使わない)
   async alarm() {
-    const st = this.ctx.storage;
-    const status = await st.get('status');
+    const st = this.ctx.storage, status = await st.get('status');
     if (status === 'closed') { await st.deleteAll(); return; }
-    if (status === 'waiting') { await this._release(false); await st.deleteAll(); return; } // ホストが来なかった(クールダウンなし)
-    if (status === 'host-away') {
-      const until = (await st.get('graceUntil')) || 0;
-      if (Date.now() >= until) await this._closeRoom(true); else await st.setAlarm(until);
-      return;
-    }
-    if (this.ctx.getWebSockets().length === 0) { await this._release(true); await st.deleteAll(); }
-    else await st.setAlarm(Date.now() + ROOM_TTL_MS);
+    if (status === 'waiting') { await this._release(false); await st.deleteAll(); return; }
+    if (this.ctx.getWebSockets().length === 0) { await this._closeRoom(true); return; }
+    await st.setAlarm(Date.now() + ROOM_TTL_MS);
   }
 }
