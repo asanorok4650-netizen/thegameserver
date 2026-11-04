@@ -142,7 +142,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
         onStatus: (t) => setNetMsg(t),
         onReady: (sess) => {
           setNetRoom({ code, authority: sess.isAuthority });
-          if (!sess.isAuthority) game.netClock = () => sess.getNetTime();
+          game.netClock = sess.isAuthority ? null : () => sess.getNetTime();
           // Simulation Authorityがスクリプトを動かし、結果を他Peerへ配る
           game.setNet(sess.isAuthority ? 'host' : 'client', sess.id, {
             sendTo: (id, m) => sess.sendGame(id, m), broadcast: (m) => sess.broadcastGame(m), sendToHost: (m) => sess.sendGameToHost(m)
