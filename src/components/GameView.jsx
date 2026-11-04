@@ -132,7 +132,6 @@ export default function GameView({ server, desc, playerName, onExit }) {
         const info = await getRoomInfo(code);
         if (info.serverId !== server.id) throw new Error('OTHER_SERVER');
         if (info.status === 'closed') throw new Error('CLOSED');
-        if (info.status === 'waiting-authority') throw new Error('AUTHORITY_UNAVAILABLE');
         if (info.players >= info.max) throw new Error('FULL');
       }
       const s = new NetSession({
