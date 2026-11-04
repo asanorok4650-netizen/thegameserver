@@ -115,7 +115,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
     room_active: 'このネットワークからのルームがまだ残っています。終了してから作り直してください'
   };
   const NET_CLOSED = {
-    'host-left': 'ホストが退出したため、ルームは終了しました',
+    'host-left': 'ゲーム進行役との接続が終了しました',
     'p2p-failed': 'ホストと直接つながりませんでした(回線の都合の可能性があります)',
     'signal-lost': '接続が切れました',
     closed: 'ルームは終了しました'
@@ -127,17 +127,17 @@ export default function GameView({ server, desc, playerName, onExit }) {
     try {
       setNetMsg('接続中…');
       let code = joinCode.trim().toUpperCase();
-      let token = '';
-      if (create) { const r = await createRoom(server.id); code = r.roomId; token = r.hostToken; }
+      if (create) { const r = await createRoom(server.id); code = r.roomId; }
       else {
         if (!ROOM_CODE_RE.test(code)) throw new Error('BAD_CODE');
         const info = await getRoomInfo(code);
         if (info.serverId !== server.id) throw new Error('OTHER_SERVER');
         if (info.status === 'closed') throw new Error('CLOSED');
+        if (info.status === 'waiting-authority') throw new Error('AUTHORITY_UNAVAILABLE');
         if (info.players >= info.max) throw new Error('FULL');
       }
       const s = new NetSession({
-        code, asHost: create, token, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
+        code, asHost: create, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
         getLocal: () => game.getNetState(),
         getTime: () => game.worldTime(),
         onStatus: (t) => setNetMsg(t),
@@ -164,7 +164,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
       const m = String(e.message);
       if (m === 'cooldown') { setNetMsg(`ルームを作り直せるまで、あと${e.retryAfter || 1}秒です`); return; }
       setNetMsg(m === 'BAD_CODE' ? 'コードは英数字6文字です' : m === 'OTHER_SERVER' ? '別のサーバーのルームです。そのサーバーを開いてから入力してください'
-        : m === 'CLOSED' ? 'そのルームは終了しています' : m === 'FULL' ? 'ルームが満員です' : NET_ERRORS[m] || 'ルームに接続できませんでした');
+        : m === 'CLOSED' ? 'そのルームは終了しています' : m === 'FULL' ? 'ルームが満員です' : m === 'AUTHORITY_UNAVAILABLE' ? 'ゲーム進行役が不在のため、現在参加できません' : NET_ERRORS[m] || 'ルームに接続できませんでした');
     }
   }
 
@@ -243,7 +243,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
         <div className="net-panel">
           {!netRoom ? (
             <>
-              <button className="net-btn" onClick={() => startRoom(true)} disabled={!!sessionRef.current}>ルームを作成(ホスト)</button>
+              <button className="net-btn" onClick={() => startRoom(true)} disabled={!!sessionRef.current}>ルームを作成</button>
               <div className="net-row">
                 <input className="net-input" value={joinCode} maxLength={6} placeholder="コード6文字" autoCapitalize="characters" onChange={(e) => setJoinCode(e.target.value.toUpperCase())} />
                 <button className="net-btn" onClick={() => startRoom(false)} disabled={!!sessionRef.current}>参加</button>
@@ -253,8 +253,8 @@ export default function GameView({ server, desc, playerName, onExit }) {
             <>
               <div className="net-label">ルームコード</div>
               <div className="net-code">{netRoom.code}</div>
-              <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.host && p.id === sessionRef.current?.id ? '(ホスト)' : ''}</li>)}</ul>
-              {netRoom.host && <div className="net-note">ホストが抜けるとルームは終了します</div>}
+              <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.host && p.id === sessionRef.current?.id ? '(進行役)' : ''}</li>)}</ul>
+              {netRoom.host && <div className="net-note">あなたはゲーム進行役です。退出後も他の参加者のRoomは維持されます</div>}
               <button className="net-btn net-leave" onClick={leaveRoom}>ルームを出る</button>
             </>
           )}
