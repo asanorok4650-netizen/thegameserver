@@ -99,6 +99,9 @@ const connect = async (room, q) => {
   assert.equal(b.last('authority-changed').id, 'p2');
   await connect(room, 'resume=' + oldToken);
   assert.equal(ctx.sockets.at(-1).closed?.code, 1008);
+  const returned = await connect(room, 'former=1&name=Creator');
+  assert.equal(returned.status, 101);
+  assert.equal(ctx.sockets.at(-1).last('hello').authority, false, 'former Authority rejoins as a normal Peer');
 }
 
 // 4) 明示退出は即時削除し、最後の退出でRoomを終了する
@@ -223,6 +226,24 @@ const connect = async (room, q) => {
   assert.deepEqual(snapshots.at(-1), []);
   session._onWs(JSON.stringify({ t: 'authority-resume', id: 'p1', name: 'Creator' }));
   assert.equal(session.players.has('p1'), true);
+}
+
+
+// Authority不在の間に切断していた通常Peerが復帰した場合、そのPeerをAuthorityに昇格する
+{
+  const { ctx, room } = await newRoom();
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  const [authority, peer] = ctx.sockets;
+  const token = peer.last('hello').resumeToken;
+  await room.webSocketClose(peer, 1006);
+  await room.webSocketClose(authority, 1006);
+  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
+  const resumed = await connect(room, 'resume=' + token);
+  assert.equal(resumed.status, 101);
+  assert.equal(ctx.sockets.at(-1).last('hello').authority, true);
+  assert.equal(await ctx.storage.get('authorityId'), 'p2');
+  assert.equal(await ctx.storage.get('status'), 'running');
 }
 
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
