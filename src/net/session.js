@@ -92,7 +92,8 @@ export class NetSession {
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
     const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + (this.resumeToken ? '&resume=' + encodeURIComponent(this.resumeToken) : '');
-    const ws = new WebSocket(url);
+    const protocols = this.resumeToken ? ['rbxl-resume.' + this.resumeToken] : undefined;
+    const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
     this.ws = ws;
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
@@ -341,8 +342,8 @@ export class NetSession {
         this.ws.close(1000);
       } else if (reason === 'left' && this.resumeToken) {
         // 切断中にユーザーが明示退出した場合も、復帰用トークンで一度だけ接続して即時退出を通知する。
-        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + '&resume=' + encodeURIComponent(this.resumeToken);
-        const leaveWs = new WebSocket(url);
+        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
+        const leaveWs = new WebSocket(url, ['rbxl-resume.' + this.resumeToken]);
         leaveWs.onopen = () => { try { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); } catch {} };
         leaveWs.onerror = () => {};
       }
