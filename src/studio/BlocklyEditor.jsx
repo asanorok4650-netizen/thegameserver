@@ -11,6 +11,8 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_when_touch', message0: 'パーツ %1 に触れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_leave', message0: 'パーツ %1 から離れたとき', args0: [{ type: 'field_input', name: 'PART', text: 'Part' }], hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_player_spawn', message0: 'プレイヤーがスポーンしたとき', hat: 'cap', nextStatement: null, colour: 25 },
+    { type: 'rbxl_when_player_join', message0: 'プレイヤーが参加したとき(マルチプレイ)', hat: 'cap', nextStatement: null, colour: 25 },
+    { type: 'rbxl_when_player_leave', message0: 'プレイヤーが退出したとき(マルチプレイ)', hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_when_interval', message0: '%1 秒ごと', args0: [{ type: 'field_number', name: 'SECONDS', value: 1, min: 0.1, max: 3600, precision: 0.1 }], hat: 'cap', nextStatement: null, colour: 25 },
     { type: 'rbxl_event_player_id', message0: 'イベントを起こしたプレイヤーID', output: 'String', colour: 25 },
     { type: 'rbxl_event_part_id', message0: 'イベント対象パーツID', output: 'String', colour: 25 },
@@ -81,7 +83,7 @@ const toolbox = {
   kind: 'categoryToolbox',
   contents: [
     { kind: 'category', name: 'イベント', colour: '#e6a23c', contents: [
-      block('rbxl_when_start'), block('rbxl_when_touch'), block('rbxl_when_leave'), block('rbxl_when_player_spawn'), block('rbxl_when_interval'),
+      block('rbxl_when_start'), block('rbxl_when_touch'), block('rbxl_when_leave'), block('rbxl_when_player_spawn'), block('rbxl_when_player_join'), block('rbxl_when_player_leave'), block('rbxl_when_interval'),
       block('rbxl_event_player_id'), block('rbxl_event_part_id'), block('rbxl_event_part_name'), block('rbxl_event_type')
     ] },
     { kind: 'category', name: '制御', colour: '#d6a23a', contents: [

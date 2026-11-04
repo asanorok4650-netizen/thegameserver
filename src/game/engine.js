@@ -11,7 +11,11 @@ import { createProgramIR } from '../scripting/ir.js';
 import { resolveRules, defaultRules, defaultEnvironment } from './rules.js';
 import { createScriptingRuntime } from '../scripting/runtime.js';
 import { RemotePlayers } from './remote.js';
+import { PlayerRegistry } from './players.js';
+import { newStats, writeStat, damageStat, healStat, resetStat } from './playerstats.js';
+import { validGameMsg } from '../net/appmsg.js';
 
+const REMOTE_SY = [0.9, 2.65, 4.4]; // 他のプレイヤーの接触判定の高さ(アバターの大きさは届かないので既定の体格)
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
 const KEYMAP = { KeyW: 'f', ArrowUp: 'f', KeyS: 'b', ArrowDown: 'b', KeyA: 'l', ArrowLeft: 'l', KeyD: 'r', ArrowRight: 'r' };
 
@@ -36,11 +40,14 @@ export class Game {
     this.setEnvironment(defaultEnvironment());
     this.remote = new RemotePlayers(this.scene); // マルチプレイ: 他プレイヤーの表示
     this.netClock = null; // マルチプレイ(クライアント): ホストの世界時刻(秒)を返す関数。null なら自分の時計だけ
+    this.localId = 'local'; this.netRole = 'solo'; this.net = null; // netRole: 'solo' | 'host' | 'client'(setNet)
+    this.players = new PlayerRegistry(); // ホスト: 他のプレイヤーの状態
+    this.partOverrides = new Map(); this._partOut = new Map(); this._netFlushAt = 0; // スクリプトで変えたパーツ(途中参加者・クライアントへ配る)
 
     this.p = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     // M1-D: 現行は単一ローカルプレイヤー。APIはIDを必須にし、将来の複数プレイヤー管理へ拡張する。
-    this.playerStats = { health: 100, maxHealth: 100, alive: true, walkSpeed: null, jumpPower: null };
+    this.playerStats = newStats();
     this.yaw = 0; this.pitch = 0.35; this.dist = 14;
     this.heading = 0;
     this.grounded = false;
@@ -112,13 +119,7 @@ export class Game {
     this.logicRuntime = createLogicRuntime(this.logic, {
       respawn: (player = 'local') => this.respawn(player),
       setCheckpoint: (position) => { this.spawn = position.slice(); },
-      complete: () => {
-        this.completed = true;
-        this.keys.clear();
-        this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
-        this.vel.set(0, 0, 0);
-        this.logicHandlers.onComplete?.();
-      }
+      complete: () => this._completeLocal()
     });
   }
 
@@ -147,20 +148,32 @@ export class Game {
     };
     this.scriptRuntime?.stop?.();
     this.scriptRuntime = createScriptingRuntime(program, {
-      onScore: handlers.onScore,
-      onMessage: handlers.onMessage,
+      // マルチプレイ(ホスト)では、スコアとメッセージは全員へ配る
+      onScore: (score, amount, playerId) => { handlers.onScore?.(score, amount, playerId); this._sendAll({ t: 'g', k: 'score', v: score, d: amount }); },
+      onMessage: (text) => { handlers.onMessage?.(text); this._sendAll({ t: 'g', k: 'msg', text }); },
       onWarning: handlers.onWarning,
-      setCheckpoint: () => { this.spawn = [this.p.x, this.p.y, this.p.z]; },
-      teleportToPart: (key, player = 'local') => { if (player !== 'local') return false; const p = atPart(key); if (!p) return false; this.p.set(...p); this.vel.set(0,0,0); this.grounded = false; return true; },
-      checkpointAtPart: (key) => { const p = atPart(key); if (p) this.spawn = p; },
-      respawn: () => this.respawn(),
-      complete: () => {
-        this.completed = true; this.keys.clear(); this.joy.x = 0; this.joy.y = 0;
-        this.jumpHeld = false; this.vel.set(0,0,0); this.logicHandlers.onComplete?.();
+      stopsOnComplete: () => this.netRole !== 'host', // ホストでは、あるプレイヤーのクリアでスクリプト全体を止めない
+      setCheckpoint: (player = 'local') => {
+        const pos = this._isLocal(player) ? [this.p.x, this.p.y, this.p.z] : this.players.get(player)?.pos;
+        if (pos) this._setCheckpoint(player, pos);
       },
-      setPartVisible: (key, visible) => { if (!this.world?.setPartVisible?.(key, visible)) handlers.onWarning?.('表示を変更するパーツが見つかりません: ' + key); },
-      movePart: (key, position) => { if (!this.world?.movePart?.(key, position)) handlers.onWarning?.('移動するパーツが見つからないか、座標が不正です: ' + key); },
-      setPartProperty: (key, property, value) => this.world?.setPartProperty?.(key, property, value) ?? false,
+      teleportToPart: (key, player = 'local') => { const p = atPart(key); return p ? this.setPlayerPosition(player, p) : false; },
+      checkpointAtPart: (key, player = 'local') => { const p = atPart(key); if (p) this._setCheckpoint(player, p); },
+      respawn: (player = 'local') => this.respawn(player),
+      complete: (player = 'local') => this._completePlayer(player),
+      setPartVisible: (key, visible) => {
+        if (!this.world?.setPartVisible?.(key, visible)) handlers.onWarning?.('表示を変更するパーツが見つかりません: ' + key);
+        else this._queuePart(key, 'visible', !!visible);
+      },
+      movePart: (key, position) => {
+        if (!this.world?.movePart?.(key, position)) handlers.onWarning?.('移動するパーツが見つからないか、座標が不正です: ' + key);
+        else this._queuePart(key, 'move', position);
+      },
+      setPartProperty: (key, property, value) => {
+        const ok = this.world?.setPartProperty?.(key, property, value) ?? false;
+        if (ok) this._queuePart(key, property, value);
+        return ok;
+      },
       getPartProperty: (key, property) => this.world?.getPartProperty?.(key, property) ?? null,
       getPlayerProperty: (player, property) => this.getPlayerProperty(player, property),
       setPlayerProperty: (player, property, value) => this.setPlayerProperty(player, property, value),
@@ -194,19 +207,54 @@ export class Game {
     this.avatar = built;
   }
 
-  /** マルチプレイで送る自分の状態: [x, y, z, 向き, 速さ, 接地] */
   /** 世界時刻(秒)。マルチプレイのクライアントならホストの時刻、そうでなければこの端末の実時間 */
   worldTime() {
     const hostTime = this.netClock?.();
     return hostTime != null ? hostTime : (performance.now() - this.clockOrigin) / 1000;
   }
 
+  /** マルチプレイで送る自分の状態: [x, y, z, 向き, 速さ, 接地] */
   getNetState() {
     return [this.p.x, this.p.y, this.p.z, this.heading, Math.hypot(this.vel.x, this.vel.z), this.grounded ? 1 : 0];
   }
 
+  // ── プレイヤー(ローカル + マルチプレイ) ──
+  // ローカルは this.p / this.playerStats。マルチプレイのホストは、他のプレイヤーを this.players(PlayerRegistry)に持つ。
+  // IDは 'local'(または自分のネットワークID)がローカル、this.players にあるIDがリモート(ホストのみ)。クライアントはスクリプトを動かさない。
+  _lid() { return this.localId || 'local'; }
+  _isLocal(id) { return id === 'local' || (!!this.localId && id === this.localId); }
+  _isRemote(id) { return this.netRole === 'host' && !!this.players?.has(id); }
+  _handlers() { return { ...this.eventRuleHandlers, ...this.scriptHandlers }; }
+
+  _onLocalDeath() {
+    this.vel.set(0, 0, 0); this.grounded = false; this.keys.clear();
+    this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false;
+  }
+
+  _completeLocal() {
+    this.completed = true; this.keys.clear(); this.joy.x = 0; this.joy.y = 0;
+    this.jumpHeld = false; this.vel.set(0, 0, 0); this.logicHandlers.onComplete?.();
+  }
+
+  /** スクリプトの complete: ローカルならその場でクリア、リモート(ホストのみ)ならそのプレイヤーへ知らせる */
+  _completePlayer(player) {
+    if (this._isLocal(player)) { this._completeLocal(); return true; }
+    if (!this._isRemote(player)) return false;
+    this.players.complete(player);
+    this._sendTo(player, { t: 'g', k: 'done' });
+    return true;
+  }
+
+  _setCheckpoint(player, position) {
+    if (!Array.isArray(position)) return false;
+    if (this._isLocal(player)) { this.spawn = position.slice(); return true; }
+    if (!this._isRemote(player)) return false;
+    this._sendTo(player, { t: 'g', k: 'cp', pos: position.slice() });
+    return true;
+  }
+
   getPlayerProperty(player, property) {
-    if (player !== 'local') return null;
+    if (!this._isLocal(player)) return this._isRemote(player) ? this.players.getProperty(player, property, this.rules) : null;
     const values = {
       health: this.playerStats.health, maxHealth: this.playerStats.maxHealth, alive: this.playerStats.alive,
       positionX: this.p.x, positionY: this.p.y, positionZ: this.p.z,
@@ -217,53 +265,212 @@ export class Game {
   }
 
   setPlayerProperty(player, property, value) {
-    if (player !== 'local') return false;
     if (property === 'position') return this.setPlayerPosition(player, value);
-    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
-    if (property === 'health') {
-      this.playerStats.health = Math.max(0, Math.min(this.playerStats.maxHealth, value));
-      this.playerStats.alive = this.playerStats.health > 0;
-      if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false; }
+    if (this._isLocal(player)) {
+      if (!writeStat(this.playerStats, property, value)) return false;
+      if (!this.playerStats.alive) this._onLocalDeath();
       return true;
     }
-    if (property === 'walkSpeed') { this.playerStats.walkSpeed = Math.max(0, Math.min(200, value)); return true; }
-    if (property === 'jumpPower') { this.playerStats.jumpPower = Math.max(0, Math.min(200, value)); return true; }
-    return false;
+    if (!this._isRemote(player) || !this.players.setProperty(player, property, value)) return false;
+    this._sendStat(player);
+    return true;
   }
 
   setPlayerPosition(player, position) {
-    if (player !== 'local' || !Array.isArray(position) || position.length !== 3 || !position.every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 100000)) return false;
-    this.p.set(position[0], position[1], position[2]);
-    this.vel.set(0, 0, 0);
-    this.grounded = false;
+    if (!Array.isArray(position) || position.length !== 3 || !position.every((v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= 100000)) return false;
+    if (this._isLocal(player)) {
+      this.p.set(position[0], position[1], position[2]);
+      this.vel.set(0, 0, 0);
+      this.grounded = false;
+      return true;
+    }
+    if (!this._isRemote(player)) return false;
+    this._sendTo(player, { t: 'g', k: 'tp', pos: position.slice() });
     return true;
   }
 
   damagePlayer(player, amount) {
-    if (player !== 'local' || !this.playerStats.alive || !Number.isFinite(amount)) return false;
-    this.playerStats.health = Math.max(0, this.playerStats.health - Math.max(0, amount));
-    this.playerStats.alive = this.playerStats.health > 0;
-    if (!this.playerStats.alive) { this.vel.set(0, 0, 0); this.grounded = false; this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.jumpHeld = false; }
+    if (this._isLocal(player)) {
+      if (!damageStat(this.playerStats, amount)) return false;
+      if (!this.playerStats.alive) this._onLocalDeath();
+      return true;
+    }
+    if (!this._isRemote(player) || !this.players.damage(player, amount)) return false;
+    this._sendStat(player);
     return true;
   }
 
   healPlayer(player, amount) {
-    if (player !== 'local' || !this.playerStats.alive || !Number.isFinite(amount)) return false;
-    this.playerStats.health = Math.min(this.playerStats.maxHealth, this.playerStats.health + Math.max(0, amount));
+    if (this._isLocal(player)) return healStat(this.playerStats, amount);
+    if (!this._isRemote(player) || !this.players.heal(player, amount)) return false;
+    this._sendStat(player);
     return true;
   }
 
-  respawn(player = 'local') {
-    if (player !== 'local') return false;
-    this.playerStats.health = this.playerStats.maxHealth;
-    this.playerStats.alive = true;
-    this.p.set(this.spawn[0], this.spawn[1], this.spawn[2]);
-    this.vel.set(0, 0, 0);
-    this.grounded = false;
-    this.activeTriggers.clear();
-    this.activeRuleTriggers.clear();
-    this.scriptRuntime?.onSpawn('local');
+  /** opts.fromHost: ホストの命令で戻る(ホストへ「戻った」と知らせ返さない) */
+  respawn(player = 'local', opts = {}) {
+    if (this._isLocal(player)) {
+      resetStat(this.playerStats);
+      this.p.set(this.spawn[0], this.spawn[1], this.spawn[2]);
+      this.vel.set(0, 0, 0);
+      this.grounded = false;
+      this.activeTriggers.clear();
+      this.activeRuleTriggers.clear();
+      this.scriptRuntime?.onSpawn(this._lid());
+      if (this.netRole === 'client' && !opts.fromHost) this._sendToHost({ t: 'g', k: 'rs' }); // ホストはHPのリセットと spawn イベントを行う
+      return true;
+    }
+    if (!this._isRemote(player)) return false;
+    this.players.respawn(player);
+    this._sendTo(player, { t: 'g', k: 'rs' });
+    this.scriptRuntime?.onSpawn(player);
     return true;
+  }
+
+  // ── マルチプレイ(M2-B): ホストがスクリプトを動かし、結果をクライアントへ配る ──
+  // net: { sendTo(id, msg), broadcast(msg), sendToHost(msg) }(GameView が NetSession を包んで渡す)
+  setNet(role, localId, net) {
+    this.netRole = role === 'host' || role === 'client' ? role : 'solo';
+    this.localId = localId || 'local';
+    this.net = net || null;
+    this.players.clear();
+    this._partOut.clear();
+    if (this.netRole === 'client') {
+      // クライアントはスクリプトを動かさない(ホストの結果だけを受け取る)。1人プレイ中に変えたパーツはホストの状態に合わせ直される
+      this.scriptRuntime?.stop?.(); this.scriptRuntime = null;
+      this.activeRuleTriggers.clear();
+      this.partOverrides.clear();
+    }
+  }
+
+  /** ルームを出た・終了した。クライアントだったなら、1人プレイの状態に戻す */
+  clearNet() {
+    const was = this.netRole;
+    this.netRole = 'solo'; this.localId = 'local'; this.net = null;
+    this.players.clear(); this._partOut.clear();
+    if (was === 'client' && this.world) {
+      Object.assign(this.playerStats, newStats());
+      this.completed = false;
+      this._createUnifiedRuntime();
+      this.respawn();
+    }
+  }
+
+  _sendTo(id, msg) { if (this.netRole === 'host' && validGameMsg(msg, true)) this.net?.sendTo?.(id, msg); }
+  _sendAll(msg) { if (this.netRole === 'host' && validGameMsg(msg, true)) this.net?.broadcast?.(msg); }
+  _sendToHost(msg) { if (this.netRole === 'client') this.net?.sendToHost?.(msg); }
+  _sendStat(id) { const m = this.players.statMessage(id); if (m) this._sendTo(id, m); }
+
+  /** スクリプトで変えたパーツを覚え(途中参加者へ送るため)、ホストなら全員へ配る(同じ(パーツ,項目)は最新だけを10Hzでまとめて送る) */
+  _queuePart(key, prop, value) {
+    const v = Array.isArray(value) ? value.slice() : value;
+    let o = this.partOverrides.get(key);
+    if (!o) { if (this.partOverrides.size >= 300) return; o = new Map(); this.partOverrides.set(key, o); }
+    o.delete(prop); o.set(prop, v); // 新しい順に並べ直す(後から来た人へ、変更を起きた順に送る)
+    if (this.netRole === 'host') this._partOut.set(key + '\u0000' + prop, { key, prop, v });
+  }
+
+  _flushNet() {
+    if (this.netRole !== 'host' || !this._partOut.size) return;
+    const now = performance.now();
+    if (now - this._netFlushAt < 100) return;
+    this._netFlushAt = now;
+    let n = 0;
+    for (const [k, e] of this._partOut) {
+      if (n++ >= 30) break; // 1回に送る数の上限。残りは次回
+      this._partOut.delete(k);
+      this._sendAll({ t: 'g', k: 'part', key: e.key, prop: e.prop, v: e.v });
+    }
+  }
+
+  _applyPart(m) {
+    const w = this.world;
+    if (!w) return;
+    if (m.prop === 'visible') w.setPartVisible?.(m.key, m.v);
+    else if (m.prop === 'move') w.movePart?.(m.key, m.v);
+    else w.setPartProperty?.(m.key, m.prop, m.v);
+  }
+
+  /** ホスト: 新しく入ったプレイヤーへ、いまの状態(パーツの変更・スコア・HP)を送る */
+  _syncJoiner(id) {
+    let n = 0;
+    for (const [key, props] of this.partOverrides) for (const [prop, v] of props) {
+      if (n++ >= 600) break;
+      this._sendTo(id, { t: 'g', k: 'part', key, prop, v });
+    }
+    this._sendTo(id, { t: 'g', k: 'score', v: this.scriptRuntime?.getScore?.() ?? 0, d: 0 });
+    this._sendStat(id);
+  }
+
+  /** ホスト: 参加者の一覧 [{id,name}](自分を含む)が変わった */
+  netPlayers(list) {
+    if (this.netRole !== 'host' || !Array.isArray(list)) return;
+    const ids = new Set(list.map((p) => p.id));
+    for (const p of list) {
+      if (this._isLocal(p.id) || this.players.has(p.id)) continue;
+      this.players.add(p.id, p.name);
+      this._syncJoiner(p.id);
+      this.scriptRuntime?.onPlayerJoin(p.id);
+      this.scriptRuntime?.onSpawn(p.id);
+    }
+    for (const pl of this.players.list()) {
+      if (ids.has(pl.id)) continue;
+      for (const tid of pl.active) { const t = this.world?.ruleTriggers?.find((x) => x.id === tid); if (t) this.scriptRuntime?.onLeave(t, pl.id); }
+      this.scriptRuntime?.onPlayerLeave(pl.id);
+      this.players.remove(pl.id);
+    }
+  }
+
+  /** ホスト: 他のプレイヤーの位置([{id,name,s}])が届いた */
+  netSnapshot(list) {
+    if (this.netRole !== 'host' || !Array.isArray(list)) return;
+    for (const e of list) this.players.setState(e.id, e.s);
+  }
+
+  /** 検証済みのゲームメッセージ(appmsg.validGameMsg を通ったもの)を受け取った */
+  netGame(fromId, m) {
+    if (!m) return;
+    if (this.netRole === 'host') {
+      if (m.k === 'rs' && this.players.has(fromId)) { this.players.respawn(fromId); this.scriptRuntime?.onSpawn(fromId); }
+      return;
+    }
+    if (this.netRole !== 'client') return;
+    const h = this._handlers();
+    switch (m.k) {
+      case 'stat': {
+        const s = this.playerStats;
+        s.health = m.h; s.maxHealth = m.mh; s.alive = m.a === 1; s.walkSpeed = m.ws; s.jumpPower = m.jp;
+        if (!s.alive) this._onLocalDeath();
+        break;
+      }
+      case 'tp': this.setPlayerPosition('local', m.pos); break;
+      case 'rs': this.respawn('local', { fromHost: true }); break;
+      case 'cp': this.spawn = m.pos.slice(); break;
+      case 'done': this._completeLocal(); break;
+      case 'score': h.onScore?.(m.v, m.d, ''); break;
+      case 'msg': h.onMessage?.(m.text); break;
+      case 'part': this._applyPart(m); break;
+      default: break;
+    }
+  }
+
+  /** ホスト: 他のプレイヤーが触れているトリガーを、届いた位置から判定する(自分の分は _checkTriggers) */
+  _checkRemoteTriggers() {
+    if (this.netRole !== 'host' || !this.scriptRuntime || !this.world?.ruleTriggers?.length || !this.players.size) return;
+    const triggers = this.world.ruleTriggers;
+    for (const pl of this.players.list()) {
+      const active = new Set();
+      if (pl.pos && pl.stats.alive && !pl.completed) {
+        for (const trigger of triggers) {
+          if (trigger.enabled === false) continue;
+          let touching = false;
+          for (const y of REMOTE_SY) if (sphereIntersectsOBB([pl.pos[0], pl.pos[1] + y, pl.pos[2]], RADIUS, trigger)) { touching = true; break; }
+          if (touching) { active.add(trigger.id); if (!pl.active.has(trigger.id)) this.scriptRuntime.onTouch(trigger, pl.id); }
+        }
+      }
+      for (const id of pl.active) if (!active.has(id)) { const t = triggers.find((x) => x.id === id); if (t) this.scriptRuntime.onLeave(t, pl.id); }
+      pl.active = active;
+    }
   }
 
   restart() {
@@ -312,11 +519,11 @@ export class Game {
     if (this.scriptRuntime && this.world?.ruleTriggers?.length) {
       const active = new Set();
       for (const trigger of this.world.ruleTriggers) {
-        if (trigger.enabled === false) { if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger, 'local'); continue; }
+        if (trigger.enabled === false) { if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger, this._lid()); continue; }
         let touching = false;
         for (const y of this.sy) if (sphereIntersectsOBB([this.p.x, this.p.y + y, this.p.z], RADIUS, trigger)) { touching = true; break; }
-        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger, 'local'); }
-        else if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger, 'local');
+        if (touching) { active.add(trigger.id); if (!this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onTouch(trigger, this._lid()); }
+        else if (this.activeRuleTriggers.has(trigger.id)) this.scriptRuntime.onLeave(trigger, this._lid());
       }
       this.activeRuleTriggers = active;
     }
@@ -329,12 +536,15 @@ export class Game {
     if (this.completed) {
       // クリア後も動く床は動かし続ける(ホストがクリアしても、全員の世界時刻は止まらない)
       if (this.world?.dynamics?.size) this.world.dynamics.step(this.time, null, null);
+      if (this.netRole === 'host') { this._checkRemoteTriggers(); this.scriptRuntime?.update?.(dt); this._flushNet(); } // ホストがクリアしても、他のプレイヤーのゲームは続く
       return;
     }
     if (!this.playerStats.alive) {
       this.vel.set(0, 0, 0);
       this.logicRuntime?.update?.({ position: this.p, dt });
+      this._checkRemoteTriggers();
       this.scriptRuntime?.update?.(dt);
+      this._flushNet();
       return;
     }
     // 動くパーツを先に進め、乗っているプレイヤーも一緒に運ぶ(衝突解決の前)
@@ -379,8 +589,10 @@ export class Game {
     this.grounded = grounded;
     this.floor = grounded ? floorNow : null; // 今乗っている衝突体(動く床・コンベア用)
     this._checkTriggers();
+    this._checkRemoteTriggers();
     this.logicRuntime?.update?.({ position: this.p, dt });
     this.scriptRuntime?.update?.(dt);
+    this._flushNet();
     if (this.holder) {
       this.holder.position.copy(this.p);
       this.holder.rotation.y = this.heading;

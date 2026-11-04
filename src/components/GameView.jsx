@@ -144,12 +144,17 @@ export default function GameView({ server, desc, playerName, onExit }) {
         onReady: (sess) => {
           setNetRoom({ code, host: sess.isHost });
           if (!sess.isHost) game.netClock = () => sess.getNetTime();
+          // ホストがスクリプトを動かし、結果をクライアントへ配る。クライアントはスクリプトを動かさない
+          game.setNet(sess.isHost ? 'host' : 'client', sess.id, {
+            sendTo: (id, m) => sess.sendGame(id, m), broadcast: (m) => sess.broadcastGame(m), sendToHost: (m) => sess.sendGameToHost(m)
+          });
         },
-        onPlayers: (list) => setNetPlayers(list),
-        onSnapshot: (list) => game.remote.apply(list),
+        onPlayers: (list) => { setNetPlayers(list); game.netPlayers(list); },
+        onSnapshot: (list) => { game.remote.apply(list); game.netSnapshot(list); },
+        onGame: (from, m) => game.netGame(from, m),
         onClosed: (reason) => {
           if (sessionRef.current !== s) return;
-          sessionRef.current = null; game.netClock = null; game.remote.clear();
+          sessionRef.current = null; game.netClock = null; game.remote.clear(); game.clearNet();
           setNetRoom(null); setNetPlayers([]); setNetMsg(NET_CLOSED[reason] || '接続が切れました');
         }
       });
@@ -167,7 +172,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
     sessionRef.current?.leave();
     sessionRef.current = null;
     const game = gameRef.current;
-    if (game) { game.netClock = null; game.remote.clear(); }
+    if (game) { game.netClock = null; game.remote.clear(); game.clearNet(); }
     setNetRoom(null); setNetPlayers([]); setNetMsg('');
   }
 
