@@ -135,6 +135,7 @@ export class NetSession {
     }
     if (m.t === 'authority-elected' || m.t === 'authority-changed') {
       const previousId = String(m.previousId || this.authorityId || '');
+      clearInterval(this.timer); clearInterval(this.pingTimer); this.timer = null; this.pingTimer = null;
       for (const peer of this.peers.values()) { peer.gone = true; clearTimeout(peer.timer); try { peer.pc.close(); } catch {} }
       this.peers.clear();
       this.players.delete(previousId);
