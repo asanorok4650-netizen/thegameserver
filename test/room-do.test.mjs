@@ -37,7 +37,7 @@ function makeCtx() {
     acceptWebSocket(ws) { sockets.push(ws); }
   };
 }
-const req = (path, o = {}) => ({ url: 'https://room' + path, method: o.method || 'GET', headers: { get: (k) => (k.toLowerCase() === 'upgrade' ? 'websocket' : null) }, json: async () => o.body });
+const req = (path, o = {}) => ({ url: 'https://room' + path, method: o.method || 'GET', headers: { get: (k) => (k.toLowerCase() === 'upgrade' ? 'websocket' : k.toLowerCase() === 'sec-websocket-protocol' ? (o.protocol || null) : null) }, json: async () => o.body });
 
 async function newRoom(env = {}) {
   const ctx = makeCtx();
@@ -46,8 +46,13 @@ async function newRoom(env = {}) {
   assert.equal(init.status, 200);
   return { ctx, room };
 }
-const wsReq = (q) => req('/ws?' + q);
-const connect = async (room, q) => { const r = await room.fetch(wsReq(q)); return r; };
+const wsReq = (q, protocol) => req('/ws?' + q, { protocol });
+const connect = async (room, q) => {
+  const match = q.match(/(?:^|&)resume=([a-f0-9]{64})(?:&|$)/);
+  const protocol = match ? 'rbxl-resume.' + match[1] : null;
+  const clean = match ? q.replace(match[0], '').replace(/^&|&$/g, '') : q;
+  return room.fetch(wsReq(clean, protocol));
+};
 
 // 1) Room作成者の特権はなく、最初に接続したPeerが暫定Authorityになる
 {
