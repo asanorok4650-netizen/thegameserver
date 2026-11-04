@@ -251,7 +251,9 @@ const connect = async (room, q) => {
 {
   const { ctx, room } = await newRoom();
   await connect(room, 'authority=1&name=Creator');
-  const authority = ctx.sockets[0];
+  await connect(room, 'name=ExistingPeer');
+  const [authority, existing] = ctx.sockets;
+  await room.webSocketClose(existing, 1006);
   await room.webSocketClose(authority, 1006);
   const former = await connect(room, 'former=1&name=Creator');
   assert.equal(former.status, 101);
@@ -259,8 +261,8 @@ const connect = async (room, q) => {
   const next = await connect(room, 'name=NewAuthority');
   assert.equal(next.status, 101);
   assert.equal(ctx.sockets.at(-1).last('hello').authority, true);
-  assert.equal(await ctx.storage.get('authorityId'), 'p3');
-  assert.equal(ctx.sockets[1].last('authority-changed').id, 'p3');
+  assert.equal(await ctx.storage.get('authorityId'), 'p4');
+  assert.equal(ctx.sockets[2].last('authority-changed').id, 'p4');
 }
 
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
