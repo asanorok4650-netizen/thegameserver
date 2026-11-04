@@ -49,9 +49,11 @@ async function newRoom(env = {}) {
 const wsReq = (q, protocol) => req('/ws?' + q, { protocol });
 const connect = async (room, q) => {
   const match = q.match(/(?:^|&)resume=([a-f0-9]{64})(?:&|$)/);
-  const protocol = match ? 'rbxl-resume.' + match[1] : null;
-  const clean = match ? q.replace(match[0], '').replace(/^&|&$/g, '') : q;
-  return room.fetch(wsReq(clean, protocol));
+  if (!match) return room.fetch(wsReq(q));
+  const response = await room.fetch(wsReq('resume=1'));
+  const ws = room.ctx?.getWebSockets?.().at(-1);
+  if (ws) await room.webSocketMessage(ws, JSON.stringify({ t: 'resume', token: match[1] }));
+  return response;
 };
 
 // 1) Room作成者の特権はなく、最初に接続したPeerが暫定Authorityになる
@@ -178,7 +180,9 @@ const connect = async (room, q) => {
 // 無効な再接続トークンは拒否する
 {
   const { room } = await newRoom();
-  assert.equal((await connect(room, 'resume=' + '0'.repeat(64))).status, 401);
+  const rejected = await connect(room, 'resume=' + '0'.repeat(64));
+  assert.equal(rejected.status, 101);
+  assert.equal((await room.ctx.getWebSockets().at(-1)).closed?.code, 1008);
 }
 
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
