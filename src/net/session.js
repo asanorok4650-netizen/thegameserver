@@ -164,8 +164,9 @@ export class NetSession {
       this._status('ゲーム進行役が退出しました。Roomは維持されています');
     }
     else if (m.t === 'peer-leave' && this.isAuthority) {
-      const p = this.peers.get(String(m.id));
+      const id = String(m.id), p = this.peers.get(id);
       if (p) this._peerLost(p);
+      else if (this.players.delete(id)) { this._broadcastCtl({ t: 'leave', id }); this._emitPlayers(); }
     } else if (m.t === 'peer-leave' && !this.isAuthority) {
       this.players.delete(String(m.id)); this._emitPlayers();
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
