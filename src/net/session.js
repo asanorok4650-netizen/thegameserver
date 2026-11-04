@@ -124,7 +124,40 @@ export class NetSession {
   _onWs(raw) {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'resume-error') { this._end('signal-lost'); return; }
+    if (m.t === 'resume-error') {
+      // Authorityは切断時点で権限を失っている。resumeせず、新しい通常Peerとして参加し直す。
+      if (this.reconnecting && !this.closed) {
+        this.resumeToken = ''; this.reconnecting = false; this.o.asAuthority = false;
+        clearTimeout(this.reconnectTimer); this._status('通常プレイヤーとして再参加中…');
+        this._openWs();
+      } else this._end('signal-lost');
+      return;
+    }
+    if (m.t === 'authority-elected' || m.t === 'authority-changed') {
+      const previousId = String(m.previousId || this.authorityId || '');
+      for (const peer of this.peers.values()) { peer.gone = true; clearTimeout(peer.timer); try { peer.pc.close(); } catch {} }
+      this.peers.clear();
+      this.players.delete(previousId);
+      const roster = Array.isArray(m.peers) ? m.peers.filter((p) => p && typeof p.id === 'string') : [];
+      this.authorityId = String(m.id);
+      this.authorityAvailable = true;
+      if (m.t === 'authority-elected') {
+        this.isAuthority = true; this.ready = true;
+        this.players = new Map(roster.map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
+        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
+        this._emitPlayers(); this._startTimer();
+        for (const p of roster) this._authorityAccept(String(p.id), cleanName(p.name));
+        this._status('ゲーム進行役を引き継ぎました');
+        this.o.onReady?.(this);
+      } else {
+        this.isAuthority = false; this.ready = false;
+        this.players = new Map(roster.map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
+        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
+        this._emitPlayers(); this.o.onSnapshot?.([]);
+        this._status('新しいゲーム進行役に接続中…');
+      }
+      return;
+    }
     if (m.t === 'hello') {
       if (typeof m.resumeToken === 'string') this.resumeToken = m.resumeToken;
       this.reconnecting = false; clearTimeout(this.reconnectTimer);
