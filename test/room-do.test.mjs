@@ -182,7 +182,7 @@ const connect = async (room, q) => {
   const { room } = await newRoom();
   const rejected = await connect(room, 'resume=' + '0'.repeat(64));
   assert.equal(rejected.status, 101);
-  assert.equal((await room.ctx.getWebSockets().at(-1)).closed?.code, 1008);
+  assert.equal(room.ctx.sockets.at(-1).closed?.code, 1008);
 }
 
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
