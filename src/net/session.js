@@ -92,9 +92,9 @@ export class NetSession {
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
     const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
-    const protocols = this.resumeToken ? ['rbxl-resume.' + this.resumeToken] : undefined;
-    const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
+    const ws = new WebSocket(url + (this.resumeToken ? '&resume=1' : ''));
     this.ws = ws;
+    ws.onopen = () => { if (this.ws === ws && this.resumeToken && this.reconnecting) ws.send(JSON.stringify({ t: 'resume', token: this.resumeToken })); };
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
     ws.onclose = () => { if (this.ws === ws && !this.closed) this._onWsClosed(); };
@@ -148,8 +148,8 @@ export class NetSession {
     else if (m.t === 'peer-resume' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'peer-disconnected' && this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
     else if (m.t === 'peer-disconnected' && !this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
-    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const p = this.peers.get(this.authorityId); if (p) this._peerLost(p); this._status('ゲーム進行役が再接続中です…'); }
-    else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this._status('ゲーム進行役に再接続中…'); }
+    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const id = this.authorityId, p = this.peers.get(id); if (p) this._peerLost(p); this.players.delete(id); this._emitPlayers(); this.o.onSnapshot?.([]); this._status('ゲーム進行役が再接続中です…'); }
+    else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this.players.set(this.authorityId, { id: this.authorityId, name: cleanName(m.name) }); this._emitPlayers(); this._status('ゲーム進行役に再接続中…'); }
     else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
     else if (m.t === 'peer-join' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'authority-left' && !this.isAuthority) {
