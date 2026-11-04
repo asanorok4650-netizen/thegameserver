@@ -56,6 +56,7 @@ const connect = async (room, q) => { const r = await room.fetch(wsReq(q)); retur
   assert.equal(ok.status, 101);
   const authority = ctx.sockets[0];
   const hello = authority.last('hello');
+  assert.match(hello.resumeToken, /^[a-f0-9]{64}$/);
   assert.equal(hello.id, 'p1');
   assert.equal(hello.authority, true);
   assert.equal(hello.host, true, '既存のSession API互換のためhostフラグを維持');
@@ -73,28 +74,45 @@ const connect = async (room, q) => { const r = await room.fetch(wsReq(q)); retur
   assert.equal((await connect(room, 'name=Taro')).status, 409);
 }
 
-// 3) Authorityが退出しても、他のPeerが残っていればRoomとWebSocketを維持する
+// 3) Authorityの一時切断は30秒予約され、同じID・権限で復帰できる
+{
+  const { ctx, room } = await newRoom();
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  const [authority, a] = ctx.sockets;
+  const token = authority.last('hello').resumeToken;
+  await room.webSocketClose(authority, 1006);
+  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
+  assert.equal(await ctx.storage.get('authorityId'), 'p1', 'Authority identity is reserved during grace');
+  assert.equal(a.last('authority-disconnected').id, 'p1');
+  assert.equal((await room.fetch(req('/info'))).status, 200);
+  assert.equal((await connect(room, 'name=Late')).status, 409, 'new joins wait during authority grace');
+  const resumed = await connect(room, 'resume=' + token);
+  assert.equal(resumed.status, 101);
+  const replacement = ctx.sockets.at(-1);
+  assert.equal(replacement.last('hello').id, 'p1');
+  assert.equal(replacement.last('hello').authority, true);
+  assert.equal(replacement.last('hello').resumed, true);
+  assert.equal(await ctx.storage.get('status'), 'running');
+  assert.equal(a.last('authority-resume').id, 'p1');
+}
+
+// 4) 明示退出は即時削除し、最後の退出でRoomを終了する
 {
   const { ctx, room } = await newRoom();
   await connect(room, 'authority=1&name=Creator');
   await connect(room, 'name=A');
   await connect(room, 'name=B');
   const [authority, a, b] = ctx.sockets;
-  await room.webSocketClose(authority, 1000);
-  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
-  assert.equal(await ctx.storage.get('authorityId'), '');
-  assert.equal(a.closed, null);
-  assert.equal(b.closed, null);
-  assert.equal(a.last('authority-left').id, 'p1');
-  assert.equal(b.last('authority-left').id, 'p1');
-  const info = await (await room.fetch(req('/info'))).json();
-  assert.equal(info.players, 2);
-  assert.equal(info.authorityAvailable, false);
-  assert.equal((await connect(room, 'name=Late')).status, 409, 'Authority不在中は新規参加を保留');
-  assert.equal((await connect(room, 'authority=1&name=Replacement')).status, 409, 'Authorityの自動交代はまだ行わない');
+  await room.webSocketMessage(a, JSON.stringify({ t: 'leave' }));
+  assert.equal(authority.last('peer-leave').id, 'p2');
+  assert.equal(b.last('peer-leave').id, 'p2');
+  await room.webSocketMessage(b, JSON.stringify({ t: 'leave' }));
+  await room.webSocketMessage(authority, JSON.stringify({ t: 'leave' }));
+  assert.equal(await ctx.storage.get('status'), 'closed');
 }
 
-// 4) 通常Peerの退出は残りのPeerへ通知し、最後の退出でRoomを終了する
+// 5) 通常Peerの退出は残りのPeerへ通知し、最後の退出でRoomを終了する
 {
   const { ctx, room } = await newRoom();
   await connect(room, 'authority=1&name=Creator');
