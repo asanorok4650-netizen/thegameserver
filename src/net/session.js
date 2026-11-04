@@ -12,6 +12,7 @@ import { validGameMsg } from './appmsg.js';
 
 const base = () => CONFIG.apiBase.replace(/\/+$/, '');
 const P2P_TIMEOUT_MS = 15000;
+const RECONNECT_GRACE_MS = 30000;
 
 async function roomRequest(path, options) {
   if (!base()) throw new Error('API_NOT_CONFIGURED');
@@ -58,6 +59,7 @@ export class NetSession {
     this.seq = 0;        // Authority: 送ったスナップショットの連番 / 通常Peer: 送った状態の連番
     this.lastSeq = -1;   // 通常Peer: 最後に採用したスナップショットの連番
     this.authorityAvailable = false;
+    this.resumeToken = ''; this.reconnectTimer = null; this.reconnectDeadline = 0; this.reconnecting = false;
   }
 
   connect() {
@@ -89,7 +91,8 @@ export class NetSession {
 
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
-    const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority));
+    const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + (this.resumeToken ? '&resume=' + encodeURIComponent(this.resumeToken) : '');
+    const ws = new WebSocket(url);
     this.ws = ws;
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
@@ -99,16 +102,34 @@ export class NetSession {
   // DOとのWebSocketが切れてもRoom全体の終了とはみなさない。
   // 自分の接続が切れた場合だけ、このセッションを終了する。
   _onWsClosed() {
-    if (!this.closed) this._end('signal-lost');
+    if (this.closed) return;
+    if (!this.resumeToken) { this._end('signal-lost'); return; }
+    if (!this.reconnecting) {
+      this.reconnecting = true;
+      this.reconnectDeadline = Date.now() + RECONNECT_GRACE_MS;
+      this._status('接続が切れました。30秒以内に再接続します…');
+      for (const peer of [...this.peers.values()]) {
+        peer.gone = true; clearTimeout(peer.timer);
+        try { peer.pc.close(); } catch {}
+      }
+      this.peers.clear();
+    }
+    if (Date.now() >= this.reconnectDeadline) { this._end('signal-lost'); return; }
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => { if (!this.closed) this._openWs(); }, 1000);
   }
 
   _onWs(raw) {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
     if (m.t === 'hello') {
+      if (typeof m.resumeToken === 'string') this.resumeToken = m.resumeToken;
+      this.reconnecting = false; clearTimeout(this.reconnectTimer);
       this.id = String(m.id); this.authorityId = String(m.authorityId || m.hostId || ''); this.isAuthority = !!(m.authority || m.host); this.authorityAvailable = !!this.authorityId;
       if (this.isAuthority) {
+        this.players = new Map((Array.isArray(m.peers) ? m.peers : []).filter((p) => p && typeof p.id === 'string').map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
         this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
+        if (m.resumed) for (const p of m.peers || []) this._authorityAccept(String(p.id), cleanName(p.name));
         this.ready = true;
         this._emitPlayers();
         this._startTimer();
@@ -121,7 +142,13 @@ export class NetSession {
         this._emitPlayers();
         this._status('ゲーム進行役と通信を準備中…');
       }
-    } else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
+    } else if (m.t === 'peer-resume' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
+    else if (m.t === 'peer-resume' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
+    else if (m.t === 'peer-disconnected' && this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
+    else if (m.t === 'peer-disconnected' && !this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
+    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const p = this.peers.get(this.authorityId); if (p) this._peerLost(p); this._status('ゲーム進行役が再接続中です…'); }
+    else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this._status('ゲーム進行役に再接続中…'); }
+    else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
     else if (m.t === 'peer-join' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'authority-left' && !this.isAuthority) {
       const peer = this.peers.get(this.authorityId);
@@ -135,7 +162,7 @@ export class NetSession {
     }
     else if (m.t === 'peer-leave' && this.isAuthority) {
       const p = this.peers.get(String(m.id));
-      if (p && !p.ready) this._peerLost(p);
+      if (p) this._peerLost(p);
     } else if (m.t === 'peer-leave' && !this.isAuthority) {
       this.players.delete(String(m.id)); this._emitPlayers();
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
@@ -284,14 +311,14 @@ export class NetSession {
     }
   }
 
-  _peerLost(peer, failed = false) {
+  _peerLost(peer, failed = false, preservePlayer = false) {
     if (!peer || peer.gone) return;
     peer.gone = true;
     clearTimeout(peer.timer);
     this.peers.delete(peer.id);
     try { peer.pc.close(); } catch (e) { /* 無視 */ }
     if (this.isAuthority) {
-      if (this.players.delete(peer.id)) { this._broadcastCtl({ t: 'leave', id: peer.id }); this._emitPlayers(); }
+      if (!preservePlayer && this.players.delete(peer.id)) { this._broadcastCtl({ t: 'leave', id: peer.id }); this._emitPlayers(); }
     } else if (peer.id === this.authorityId) {
       this.authorityAvailable = false; this.authorityId = '';
       this._status('ゲーム進行役とのP2P接続が切れました。Roomには残っています');
@@ -301,13 +328,13 @@ export class NetSession {
   _end(reason, silent = false) {
     if (this.closed) return;
     this.closed = true;
-    clearInterval(this.timer); clearInterval(this.pingTimer);
+    clearInterval(this.timer); clearInterval(this.pingTimer); clearTimeout(this.reconnectTimer);
     // Room退出はWebSocketを閉じるだけ。Roomを閉じる特別なPeerはいない。
     const peers = [...this.peers.values()];
     this.peers.clear();
     const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
     closePeers();
-    try { this.ws?.close(1000); } catch (e) { /* 無視 */ }
+    try { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'leave' })); this.ws?.close(1000); } catch (e) { /* 無視 */ }
     if (!silent) this.o.onClosed?.(reason);
   }
 }
