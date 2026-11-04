@@ -91,7 +91,7 @@ export class NetSession {
 
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
-    const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + (this.resumeToken ? '&resume=' + encodeURIComponent(this.resumeToken) : '');
+    const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
     const protocols = this.resumeToken ? ['rbxl-resume.' + this.resumeToken] : undefined;
     const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
     this.ws = ws;
