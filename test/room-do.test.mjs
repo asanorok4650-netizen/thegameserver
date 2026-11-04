@@ -95,8 +95,8 @@ const connect = async (room, q) => {
   assert.equal(await ctx.storage.get('authorityId'), 'p2');
   assert.equal((await ctx.storage.get('members')).p1, undefined);
   assert.equal((await ctx.storage.get('members')).p2.authority, true);
-  assert.equal(a.last('authority-changed').id, 'p2');
-  assert.equal(b.last('authority-elected').id, 'p2');
+  assert.equal(a.last('authority-elected').id, 'p2');
+  assert.equal(b.last('authority-changed').id, 'p2');
   await connect(room, 'resume=' + oldToken);
   assert.equal(ctx.sockets.at(-1).closed?.code, 1008);
 }
