@@ -217,7 +217,8 @@ export function compileBlocklyWorkspace(workspace) {
   const events = [];
   const eventMap = {
     rbxl_when_start: 'start', rbxl_when_touch: 'touch', rbxl_when_leave: 'leave',
-    rbxl_when_player_spawn: 'spawn', rbxl_when_interval: 'interval'
+    rbxl_when_player_spawn: 'spawn', rbxl_when_interval: 'interval',
+    rbxl_when_player_join: 'playerJoin', rbxl_when_player_leave: 'playerLeave'
   };
   for (const root of workspace.blocks.blocks) {
     const event = eventMap[root.type];

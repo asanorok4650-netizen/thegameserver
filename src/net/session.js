@@ -9,6 +9,7 @@ import {
   encode, decode, cleanName, packState, validState, validSnapshot, validPlayers, validSeq
 } from './protocol.js';
 import { ClockSync } from './clock.js';
+import { validGameMsg } from './appmsg.js';
 
 const base = () => CONFIG.apiBase.replace(/\/+$/, '');
 const P2P_TIMEOUT_MS = 15000;
@@ -44,7 +45,8 @@ const wsUrl = (code, name, asHost, token) => base().replace(/^http/, 'ws')
 export class NetSession {
   /**
    * @param o { code, name, asHost, token(ホストのみ), sendHz, getLocal:()=>[x,y,z,heading,speed,grounded], getTime:()=>秒(ホストの世界時刻),
-   *            onStatus(text), onReady(session), onPlayers([{id,name}]), onSnapshot([{id,name,s}]), onClosed(reason) }
+   *            onStatus(text), onReady(session), onPlayers([{id,name}]), onSnapshot([{id,name,s}]), onClosed(reason),
+   *            onGame(fromId, msg)(ゲーム内容のメッセージ。appmsg.validGameMsg を通ったものだけ) }
    */
   constructor(o) {
     this.o = o;
@@ -67,6 +69,14 @@ export class NetSession {
   }
 
   leave() { this._end('left', true); }
+
+  // ゲーム内容のメッセージ(appmsg.js)。制御チャネル(信頼・順序あり)で送る
+  /** ホスト: 1人へ */
+  sendGame(id, msg) { if (this.isHost) this._sendCtl(this.peers.get(id), msg); }
+  /** ホスト: 全員へ */
+  broadcastGame(msg) { if (this.isHost) this._broadcastCtl(msg); }
+  /** クライアント: ホストへ */
+  sendGameToHost(msg) { if (!this.isHost) this._sendCtl(this.peers.get(this.hostId), msg); }
 
   /** ホストの世界時刻(秒)の推定値。クライアントのみ。まだ分からなければ null */
   getNetTime() { return this.sync.time(); }
@@ -215,6 +225,11 @@ export class NetSession {
     if (now - peer.ctlWindow > 1000) { peer.ctlWindow = now; peer.ctlCount = 0; }
     if (++peer.ctlCount > CTL_MAX_PER_SEC) return; // 制御メッセージの送りすぎは捨てる
     if (m.t === 'ping') { this._sendCtl(peer, { t: 'pong', c: m.c }); return; }
+    if (m.t === 'g') { // ホストは参加者から、参加者はホストからだけ受け取る(検証を通ったものだけ)
+      const g = validGameMsg(m, !this.isHost);
+      if (g) this.o.onGame?.(this.isHost ? peer.id : this.hostId, g);
+      return;
+    }
     if (this.isHost) {
       if (m.t === 'bye') this._peerLost(peer); // 相手が自分から抜けた(切断の検出を待たずに済む)
       return;

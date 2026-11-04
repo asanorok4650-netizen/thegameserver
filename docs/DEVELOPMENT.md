@@ -319,5 +319,24 @@ Worker の環境設定は `worker/wrangler.toml` を参照してください。�
 - デプロイ時に `worker/schema.sql` を D1 へ流す(`npx wrangler d1 execute rbxl-servers-db --remote --file=./schema.sql`)。未作成でも動くが、制限は効かない(`/api/health` の `roomLimit` が `false`)。
 - 同じネットワーク(学校・会社・携帯回線のNAT)の人は、枠を共有する。
 
+### M2-B: ホストがスクリプトを動かす
+役割は `Game.netRole`(`solo` / `host` / `client`)。ルームに入ると GameView が `game.setNet()` を呼び、出ると `game.clearNet()` で1人プレイに戻る。
+- **ホスト**: Blockly のスクリプト(`scriptRuntime`)を1か所で動かす。他のプレイヤーの位置は `netSnapshot` で `PlayerRegistry`(`src/game/players.js`)へ入れ、`_checkRemoteTriggers()` が触れたかどうかを判定して、そのプレイヤーのIDで touch / leave を起こす。HP・生存・速度・クリアはホストが持つ。
+- **クライアント**: スクリプトを動かさない。ホストから届く結果だけを反映する(`netGame`)。
+- **ブロックの「プレイヤー」**: `local`(または空)は「そのイベントを起こしたプレイヤー」。1人プレイでは常に自分なので、これまでどおり。`start` / `interval` イベントでは、ホスト自身。
+- **スコア**: 全体の合計(全員に配る)に加え、`addScore` を起こしたプレイヤーごとにも数える(`runtime.getPlayerScore(id)` / `getScores()`)。変数は全体で1つ。
+- **メッセージ**: ホストのスクリプトの `message` は全員に出る。
+- **クリア**: ホストでは、あるプレイヤーがクリアしてもスクリプト全体は止まらない(1人プレイでは従来どおり止まる)。クリアしたプレイヤーには `done` が届く。
+- **参加・退出**: ブロック「プレイヤーが参加したとき / 退出したとき」(IRの `playerJoin` / `playerLeave`)。参加時は spawn イベントも起きる。
+- **パーツの変更**: `setPartVisible` / `movePart` / `setPartProperty` の結果を、最新の値だけ100msごとにまとめて全員へ(1回に30件まで)。途中参加者には、いまの状態を順に送る(最大600件)。
+
+ゲーム内容のメッセージは制御チャネルの `{t:'g', k:...}`(`src/net/appmsg.js`)。ホスト→クライアントは `stat` / `tp` / `rs` / `cp` / `done` / `score` / `msg` / `part`、クライアント→ホストは `rs`(自分でリスポーンした)だけ。どちらも `validGameMsg` を通ったものだけを使う。
+
+既知の制限:
+- 位置は各自が計算して送る信用ベースのまま。Obby の kill / checkpoint / goal(タグによる `logicRuntime`)は、各プレイヤーの端末の中で判定される。
+- スクリプトでパーツを毎フレーム動かすと、クライアントには10Hzでしか届かず、カクつく(動く床の spinner / mover は時刻の関数なので影響なし)。
+- ルームを出ても、ホストのスクリプトで変わったパーツは元に戻らない(サーバーを開き直す)。ホストの「やり直し」は、スクリプト全体(全員のスコア・変数)をリセットする。
+- 他プレイヤーの見た目はカプセルのまま。接触判定は既定の体格で行う。
+
 ### まだ入っていないこと
-他プレイヤーのトリガー・HP・スコアの同期(M2-B)、TURN、ホスト交代、ホームからのコード入力。
+TURN、ホスト交代、ホームからのコード入力、他プレイヤーのアバター表示。

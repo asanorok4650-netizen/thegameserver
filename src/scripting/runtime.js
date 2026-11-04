@@ -21,6 +21,9 @@ export function createScriptingRuntime(program, api = {}) {
   const tasks = [];
   const intervals = new Map();
   let score = 0, elapsed = 0, stopped = false;
+  const personal = new Map(); // プレイヤーごとの得点(addScore を起こしたイベントのプレイヤーに加算)
+  // ブロックの「プレイヤー」が 'local'(または空)のときは「そのイベントを起こしたプレイヤー」。1人プレイでは常に 'local'
+  const who = (player, context) => (!player || player === 'local') ? (context?.playerId || 'local') : String(player);
   let randomState = (Number(program?.randomSeed ?? api.randomSeed ?? 0x6d2b79f5) >>> 0) || 0x6d2b79f5;
   const random = () => { randomState ^= randomState << 13; randomState ^= randomState >>> 17; randomState ^= randomState << 5; return (randomState >>> 0) / 0x100000000; };
   let work = MAX_WORK_PER_TICK;
@@ -36,7 +39,7 @@ export function createScriptingRuntime(program, api = {}) {
     if (node.op === 'vector') return (node.values || []).slice(0, 3).map((item) => clamp(Number(read(item, context))));
     if (node.op === 'playerGet') {
       if (typeof api.getPlayerProperty !== 'function') { warnOnce('プレイヤー情報の取得APIが利用できません'); return node.property === 'alive' ? false : 0; }
-      const result = api.getPlayerProperty(node.player, node.property);
+      const result = api.getPlayerProperty(who(node.player, context), node.property);
       if (result === null || result === undefined) { warnOnce('プレイヤー情報を取得できません: ' + String(node.player).slice(0, 100)); return node.property === 'alive' ? false : 0; }
       return cloneValue(result);
     }
@@ -101,7 +104,10 @@ export function createScriptingRuntime(program, api = {}) {
           break;
         case 'addScore': {
           const amount = clamp(read(step.amount, context)); score = clamp(score + amount);
-          variables.set('score', score); api.onScore?.(score, amount); yield 0; break;
+          variables.set('score', score);
+          const pid = context.playerId || '';
+          if (pid) personal.set(pid, clamp((personal.get(pid) || 0) + amount));
+          api.onScore?.(score, amount, pid); yield 0; break;
         }
         case 'setVariable': variables.set(step.name, cloneValue(read(step.value, context))); yield 0; break;
         case 'changeVariable': variables.set(step.name, clamp((variables.get(step.name)||0) + read(step.value, context))); yield 0; break;
@@ -123,17 +129,17 @@ export function createScriptingRuntime(program, api = {}) {
         case 'partVisible': if (api.setPartVisible) api.setPartVisible(step.part, !!step.visible); else api.onWarning?.('パーツ表示ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'movePart': if (api.movePart) api.movePart(step.part, step.position); else api.onWarning?.('パーツ移動ブロックはまだ未対応です: ' + step.part); yield 0; break;
         case 'playerSet': {
-          const accepted = api.setPlayerProperty?.(step.player, step.property, read(step.value, context));
+          const accepted = api.setPlayerProperty?.(who(step.player, context), step.property, read(step.value, context));
           if (!accepted) warnOnce('プレイヤーのプロパティを変更できません: ' + String(step.player).slice(0, 100) + ' (' + String(step.property).slice(0, 40) + ')');
           yield 0; break;
         }
         case 'playerDamage': {
-          const accepted = api.damagePlayer?.(step.player, Math.max(0, Number(read(step.amount, context)) || 0));
+          const accepted = api.damagePlayer?.(who(step.player, context), Math.max(0, Number(read(step.amount, context)) || 0));
           if (!accepted) warnOnce('プレイヤーにダメージを適用できません: ' + String(step.player).slice(0, 100));
           yield 0; break;
         }
         case 'playerHeal': {
-          const accepted = api.healPlayer?.(step.player, Math.max(0, Number(read(step.amount, context)) || 0));
+          const accepted = api.healPlayer?.(who(step.player, context), Math.max(0, Number(read(step.amount, context)) || 0));
           if (!accepted) warnOnce('プレイヤーを回復できません: ' + String(step.player).slice(0, 100));
           yield 0; break;
         }
@@ -143,11 +149,15 @@ export function createScriptingRuntime(program, api = {}) {
             if (!accepted) warnOnce('パーツのプロパティを変更できません: ' + String(step.part).slice(0, 100) + ' (' + String(step.property).slice(0, 40) + ')');
           } else warnOnce('パーツのプロパティ設定APIが利用できません');
           yield 0; break;
-        case 'checkpoint': api.setCheckpoint?.(); yield 0; break;
-        case 'teleportToPart': { const accepted = api.teleportToPart?.(step.part, step.player || 'local'); if (accepted === false) warnOnce('プレイヤーの移動先またはIDが不正です: ' + String(step.player || 'local')); yield 0; break; }
-        case 'checkpointAtPart': api.checkpointAtPart?.(step.part); yield 0; break;
-        case 'respawn': { const accepted = api.respawn?.(step.player || 'local'); if (accepted === false) warnOnce('リスポーン対象のプレイヤーIDが不正です: ' + String(step.player || 'local')); yield 0; break; }
-        case 'complete': stopped = true; api.complete?.(); return;
+        case 'checkpoint': api.setCheckpoint?.(who('', context)); yield 0; break;
+        case 'teleportToPart': { const accepted = api.teleportToPart?.(step.part, who(step.player, context)); if (accepted === false) warnOnce('プレイヤーの移動先またはIDが不正です: ' + String(step.player || 'local')); yield 0; break; }
+        case 'checkpointAtPart': api.checkpointAtPart?.(step.part, who('', context)); yield 0; break;
+        case 'respawn': { const accepted = api.respawn?.(who(step.player, context)); if (accepted === false) warnOnce('リスポーン対象のプレイヤーIDが不正です: ' + String(step.player || 'local')); yield 0; break; }
+        case 'complete':
+          // 1人プレイでは、クリアでスクリプト全体が止まる。マルチプレイ(ホスト)ではクリアしたプレイヤーだけの話なので止めない
+          if (api.stopsOnComplete?.() !== false) stopped = true;
+          api.complete?.(who('', context));
+          return;
         default: warnOnce('未対応の処理命令をスキップしました: ' + String(step.op || 'unknown').slice(0, 80)); yield 0;
       }
     }
@@ -162,6 +172,8 @@ export function createScriptingRuntime(program, api = {}) {
   return {
     start() { launch('start'); },
     onSpawn(playerId = 'local') { launch('spawn', '', '', { playerId }); },
+    onPlayerJoin(playerId) { launch('playerJoin', '', '', { playerId }); },
+    onPlayerLeave(playerId) { launch('playerLeave', '', '', { playerId }); },
     onTouch(part, playerId = 'local') { launch('touch', part?.id, part?.name, { playerId, partId: part?.id, partName: part?.name }); },
     onLeave(part, playerId = 'local') { launch('leave', part?.id, part?.name, { playerId, partId: part?.id, partName: part?.name }); },
     update(dt) {
@@ -184,8 +196,10 @@ export function createScriptingRuntime(program, api = {}) {
       }
       if (tasks.length > MAX_TASKS) tasks.length = MAX_TASKS;
     },
-    reset() { tasks.length = 0; intervals.clear(); warned.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, cloneValue(v.initial)); randomState = (Number(program?.randomSeed ?? api.randomSeed ?? 0x6d2b79f5) >>> 0) || 0x6d2b79f5; score=0; elapsed=0; stopped=false; api.onScore?.(0,0); },
+    reset() { tasks.length = 0; intervals.clear(); warned.clear(); work = MAX_WORK_PER_TICK; variables.clear(); variables.set('score',0); for (const v of program?.variables || []) variables.set(v.name, cloneValue(v.initial)); randomState = (Number(program?.randomSeed ?? api.randomSeed ?? 0x6d2b79f5) >>> 0) || 0x6d2b79f5; score=0; elapsed=0; stopped=false; personal.clear(); api.onScore?.(0,0,''); },
     getScore: () => score,
+    getPlayerScore: (playerId) => personal.get(String(playerId)) || 0,
+    getScores: () => Object.fromEntries(personal),
     getVariables: () => Object.fromEntries([...variables].map(([name, value]) => [name, cloneValue(value)])),
     stop() { stopped = true; tasks.length = 0; }
   };
