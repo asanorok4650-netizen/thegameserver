@@ -289,7 +289,7 @@ export class Room {
     }
     return this._res({ error: 'not_found' }, 404);
   }
-  // Room作成者ではなく、最初に接続したPeerが暫定Simulation Authorityになる。
+  // Room作成者ではなく、最初に接続したPeerがSimulation Authorityになり、切断時は別Peerへ即時に引き継ぐ。
   async _acceptAuthority(url, st, status) {
     if (status !== 'waiting') return new Response('authority_exists', { status: 409 });
     if (await st.get('authorityId')) return new Response('authority_exists', { status: 409 });
