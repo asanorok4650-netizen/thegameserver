@@ -162,6 +162,25 @@ const connect = async (room, q) => {
   assert.equal(ctx.sockets[0].last('peer-leave').id, 'p2');
 }
 
+// Authorityの明示退出は即時に権限を解放するが、残りPeerのRoomは維持する
+{
+  const { ctx, room } = await newRoom();
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  const [authority, peer] = ctx.sockets;
+  await room.webSocketMessage(authority, JSON.stringify({ t: 'leave' }));
+  assert.equal((await ctx.storage.get('members')).p1, undefined);
+  assert.equal(await ctx.storage.get('authorityId'), '');
+  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
+  assert.equal(peer.last('authority-left').id, 'p1');
+}
+
+// 無効な再接続トークンは拒否する
+{
+  const { room } = await newRoom();
+  assert.equal((await connect(room, 'resume=' + '0'.repeat(64))).status, 401);
+}
+
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
 {
   const { ctx, room } = await newRoom();
