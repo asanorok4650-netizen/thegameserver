@@ -244,7 +244,7 @@ export class Room {
   _broadcast(message, exceptId) {
     for (const ws of this.ctx.getWebSockets()) {
       const peer = ws.deserializeAttachment();
-      if (peer && peer.id !== exceptId) { try { ws.send(JSON.stringify(message)); } catch { /* 接続終了中 */ } }
+      if (peer && !peer.pendingResume && peer.id !== exceptId) { try { ws.send(JSON.stringify(message)); } catch { /* 接続終了中 */ } }
     }
   }
   async fetch(request) {
@@ -280,7 +280,7 @@ export class Room {
       const members = (await st.get('members')) || {};
       members[id] = { id, name, authority: promote, tokenHash: await tokenHash(resumeToken), deadline: 0 };
       await st.put({ seq, members, ...(promote ? { status: 'running', authorityId } : {}) });
-      const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
+      const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
       server.send(JSON.stringify({ t: 'hello', id, host: promote, authority: promote, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken, resumed: false, promoted: promote, peers }));
       if (promote) this._broadcast({ t: 'authority-changed', id, name, previousId: '', previousName: '', peers }, id);
       else this._broadcast({ t: 'peer-join', id, name }, id);
