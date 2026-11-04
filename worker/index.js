@@ -284,7 +284,7 @@ export class Room {
       server.send(JSON.stringify({ t: 'hello', id, host: promote, authority: promote, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken, resumed: false, promoted: promote, peers }));
       if (promote) this._broadcast({ t: 'authority-changed', id, name, previousId: '', previousName: '', peers }, id);
       else this._broadcast({ t: 'peer-join', id, name }, id);
-      await st.setAlarm(Date.now() + ROOM_TTL_MS);
+      await this._scheduleAlarm();
       return new Response(null, { status: 101, webSocket: client });
     }
     return this._res({ error: 'not_found' }, 404);
