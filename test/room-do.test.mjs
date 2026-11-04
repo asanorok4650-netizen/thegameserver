@@ -265,6 +265,24 @@ const connect = async (room, q) => {
   assert.equal(ctx.sockets[2].last('authority-changed').id, 'p4');
 }
 
+
+// Authority変更通知を受けた通常Peerは、新Authorityへ接続し直す
+{
+  const snapshots = [];
+  const session = new NetSession({ onSnapshot: (list) => snapshots.push(list) });
+  session.id = 'p3'; session.authorityId = 'p1'; session.isAuthority = false; session.ready = true;
+  session.players.set('p1', { id: 'p1', name: 'Old' });
+  session.players.set('p3', { id: 'p3', name: 'Me' });
+  session._onWs(JSON.stringify({ t: 'authority-changed', id: 'p2', name: 'New', previousId: 'p1', peers: [{ id: 'p2', name: 'New' }, { id: 'p3', name: 'Me' }] }));
+  assert.equal(session.isAuthority, false);
+  assert.equal(session.authorityId, 'p2');
+  assert.equal(session.authorityAvailable, true);
+  assert.equal(session.ready, false);
+  assert.equal(session.players.has('p1'), false);
+  assert.equal(session.players.has('p2'), true);
+  assert.deepEqual(snapshots.at(-1), []);
+}
+
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
 {
   const { ctx, room } = await newRoom();
