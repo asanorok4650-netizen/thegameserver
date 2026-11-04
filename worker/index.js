@@ -356,7 +356,16 @@ export class Room {
       const members = (await this.ctx.storage.get('members')) || {};
       const hash = await tokenHash(m.token);
       const member = Object.values(members).find((p) => p.tokenHash === hash);
-      if (!member || !member.deadline || member.deadline < Date.now() || this._byId(member.id)) {
+      const currentSocket = member ? this._byId(member.id) : null;
+      // 旧Authorityのresume要求は、closeイベントとの競合や旧30秒猶予中でも必ず失効させる。
+      if (member?.authority && !currentSocket) {
+        delete members[member.id];
+        await this.ctx.storage.put('members', members);
+        await this._electAuthority(member.id, member.name);
+        try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'authority-role-revoked' })); ws.close(1008, 'authority role revoked'); } catch {}
+        return;
+      }
+      if (!member || !member.deadline || member.deadline < Date.now() || currentSocket) {
         try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'expired-or-connected' })); ws.close(1008, 'resume rejected'); } catch {}
         return;
       }
