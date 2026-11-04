@@ -266,8 +266,7 @@ export class Room {
     if (url.pathname.endsWith('/ws')) {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
       if (status === 'closed') return new Response('closed', { status: 410 });
-      const resumeProtocol = request.headers.get('Sec-WebSocket-Protocol') || '';
-      if (resumeProtocol.startsWith('rbxl-resume.')) return this._resumePeer(st, resumeProtocol);
+      if (url.searchParams.get('resume') === '1') return this._acceptResumeSocket();
       if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
       if (status === 'waiting') return new Response('no_authority', { status: 409 });
       if (status === 'waiting-authority') return new Response('authority_unavailable', { status: 409 });
@@ -308,27 +307,11 @@ export class Room {
     server.send(JSON.stringify({ t: 'hello', id, host: true, authority: true, hostId: id, authorityId: id, max: ROOM_MAX, resumeToken, resumed: false, peers }));
     return new Response(null, { status: 101, webSocket: client });
   }
-  async _resumePeer(st, resumeProtocol) {
-    const token = resumeProtocol.slice('rbxl-resume.'.length);
-    if (!/^[a-f0-9]{64}$/.test(token)) return new Response('invalid_resume', { status: 401 });
-    const hash = await tokenHash(token), members = (await st.get('members')) || {};
-    const member = Object.values(members).find((m) => m.tokenHash === hash);
-    if (!member) return new Response('invalid_resume', { status: 401 });
-    if (!member.deadline) return new Response('already_connected', { status: 409 });
-    if (member.deadline < Date.now()) return new Response('resume_expired', { status: 410 });
-    if (this._byId(member.id)) return new Response('already_connected', { status: 409 });
+  _acceptResumeSocket() {
     const pair = new WebSocketPair(), [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ id: member.id, name: member.name, authority: member.authority, resumeTokenHash: hash });
-    member.deadline = 0; members[member.id] = member;
-    const active = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== member.id);
-    await st.put({ members, ...(member.authority ? { status: 'running', authorityId: member.id } : {}) });
-    const authorityId = await st.get('authorityId');
-    server.send(JSON.stringify({ t: 'hello', id: member.id, name: member.name, authority: member.authority, host: member.authority, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken: token, resumed: true, peers: active.map((p) => ({ id: p.id, name: p.name })) }));
-    if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
-    else this._broadcast({ t: 'peer-resume', id: member.id, name: member.name }, member.id);
-    await this._scheduleAlarm();
-    return new Response(null, { status: 101, webSocket: client, headers: { 'Sec-WebSocket-Protocol': resumeProtocol } });
+    server.serializeAttachment({ pendingResume: true });
+    return new Response(null, { status: 101, webSocket: client });
   }
   async _scheduleAlarm() {
     const st = this.ctx.storage, members = (await st.get('members')) || {};
@@ -341,6 +324,30 @@ export class Room {
     if (!m || typeof m !== 'object') return;
     const me = ws.deserializeAttachment();
     if (!me) return;
+    if (me.pendingResume) {
+      if (m.t !== 'resume' || typeof m.token !== 'string' || !/^[a-f0-9]{64}$/.test(m.token)) {
+        try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'invalid-token' })); ws.close(1008, 'invalid resume'); } catch {}
+        return;
+      }
+      const members = (await this.ctx.storage.get('members')) || {};
+      const hash = await tokenHash(m.token);
+      const member = Object.values(members).find((p) => p.tokenHash === hash);
+      if (!member || !member.deadline || member.deadline < Date.now() || this._byId(member.id)) {
+        try { ws.send(JSON.stringify({ t: 'resume-error', reason: 'expired-or-connected' })); ws.close(1008, 'resume rejected'); } catch {}
+        return;
+      }
+      member.deadline = 0;
+      members[member.id] = member;
+      ws.serializeAttachment({ id: member.id, name: member.name, authority: member.authority, resumeTokenHash: hash });
+      await this.ctx.storage.put({ members, ...(member.authority ? { status: 'running', authorityId: member.id } : {}) });
+      const active = this.ctx.getWebSockets().map((sock) => sock.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== member.id);
+      const authorityId = await this.ctx.storage.get('authorityId');
+      ws.send(JSON.stringify({ t: 'hello', id: member.id, name: member.name, authority: member.authority, host: member.authority, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken: m.token, resumed: true, peers: active.map((p) => ({ id: p.id, name: p.name })) }));
+      if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
+      else this._broadcast({ t: 'peer-resume', id: member.id, name: member.name }, member.id);
+      await this._scheduleAlarm();
+      return;
+    }
     if (m.t === 'leave') {
       ws.serializeAttachment({ ...me, intentional: true });
       const st = this.ctx.storage, members = (await st.get('members')) || {};

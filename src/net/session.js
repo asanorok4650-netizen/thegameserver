@@ -92,9 +92,9 @@ export class NetSession {
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
     const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
-    const protocols = this.resumeToken ? ['rbxl-resume.' + this.resumeToken] : undefined;
-    const ws = protocols ? new WebSocket(url, protocols) : new WebSocket(url);
+    const ws = new WebSocket(url + (this.resumeToken ? '&resume=1' : ''));
     this.ws = ws;
+    ws.onopen = () => { if (this.ws === ws && this.resumeToken && this.reconnecting) ws.send(JSON.stringify({ t: 'resume', token: this.resumeToken })); };
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
     ws.onclose = () => { if (this.ws === ws && !this.closed) this._onWsClosed(); };
@@ -124,6 +124,7 @@ export class NetSession {
   _onWs(raw) {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
+    if (m.t === 'resume-error') { this._end('signal-lost'); return; }
     if (m.t === 'hello') {
       if (typeof m.resumeToken === 'string') this.resumeToken = m.resumeToken;
       this.reconnecting = false; clearTimeout(this.reconnectTimer);
@@ -148,8 +149,8 @@ export class NetSession {
     else if (m.t === 'peer-resume' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'peer-disconnected' && this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
     else if (m.t === 'peer-disconnected' && !this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
-    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const p = this.peers.get(this.authorityId); if (p) this._peerLost(p); this._status('ゲーム進行役が再接続中です…'); }
-    else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this._status('ゲーム進行役に再接続中…'); }
+    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const id = this.authorityId, p = this.peers.get(id); if (p) this._peerLost(p); this.authorityAvailable = false; this.authorityId = ''; this.players.delete(id); this._emitPlayers(); this.o.onSnapshot?.([]); this._status('ゲーム進行役が再接続中です…'); }
+    else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this.players.set(this.authorityId, { id: this.authorityId, name: cleanName(m.name) }); this._emitPlayers(); this._status('ゲーム進行役に再接続中…'); }
     else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
     else if (m.t === 'peer-join' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'authority-left' && !this.isAuthority) {
@@ -163,8 +164,9 @@ export class NetSession {
       this._status('ゲーム進行役が退出しました。Roomは維持されています');
     }
     else if (m.t === 'peer-leave' && this.isAuthority) {
-      const p = this.peers.get(String(m.id));
+      const id = String(m.id), p = this.peers.get(id);
       if (p) this._peerLost(p);
+      else if (this.players.delete(id)) { this._broadcastCtl({ t: 'leave', id }); this._emitPlayers(); }
     } else if (m.t === 'peer-leave' && !this.isAuthority) {
       this.players.delete(String(m.id)); this._emitPlayers();
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
@@ -342,9 +344,17 @@ export class NetSession {
         this.ws.close(1000);
       } else if (reason === 'left' && this.resumeToken) {
         // 切断中にユーザーが明示退出した場合も、復帰用トークンで一度だけ接続して即時退出を通知する。
-        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
-        const leaveWs = new WebSocket(url, ['rbxl-resume.' + this.resumeToken]);
-        leaveWs.onopen = () => { try { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); } catch {} };
+        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + '&resume=1';
+        const leaveWs = new WebSocket(url);
+        leaveWs.onopen = () => {
+          try {
+            leaveWs.send(JSON.stringify({ t: 'resume', token: this.resumeToken }));
+            leaveWs.onmessage = (event) => {
+              let message; try { message = JSON.parse(event.data); } catch { return; }
+              if (message.t === 'hello') { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); }
+            };
+          } catch {}
+        };
         leaveWs.onerror = () => {};
       }
     } catch (e) { /* 無視 */ }

@@ -20,6 +20,7 @@ class FakeWs {
 globalThis.WebSocketPair = class { constructor() { this[0] = new FakeWs(); this[1] = new FakeWs(); } };
 
 const { Room } = await import('../worker/index.js');
+const { NetSession } = await import('../src/net/session.js');
 const { acquireSlot, releaseSlot, ROOM_CREATE_COOLDOWN_MS } = await import('../worker/room-limit.js');
 
 function makeCtx() {
@@ -49,9 +50,11 @@ async function newRoom(env = {}) {
 const wsReq = (q, protocol) => req('/ws?' + q, { protocol });
 const connect = async (room, q) => {
   const match = q.match(/(?:^|&)resume=([a-f0-9]{64})(?:&|$)/);
-  const protocol = match ? 'rbxl-resume.' + match[1] : null;
-  const clean = match ? q.replace(match[0], '').replace(/^&|&$/g, '') : q;
-  return room.fetch(wsReq(clean, protocol));
+  if (!match) return room.fetch(wsReq(q));
+  const response = await room.fetch(wsReq('resume=1'));
+  const ws = room.ctx?.getWebSockets?.().at(-1);
+  if (ws) await room.webSocketMessage(ws, JSON.stringify({ t: 'resume', token: match[1] }));
+  return response;
 };
 
 // 1) Room作成者の特権はなく、最初に接続したPeerが暫定Authorityになる
@@ -178,7 +181,55 @@ const connect = async (room, q) => {
 // 無効な再接続トークンは拒否する
 {
   const { room } = await newRoom();
-  assert.equal((await connect(room, 'resume=' + '0'.repeat(64))).status, 401);
+  const rejected = await connect(room, 'resume=' + '0'.repeat(64));
+  assert.equal(rejected.status, 101);
+  assert.equal(room.ctx.sockets.at(-1).closed?.code, 1008);
+}
+
+// Authorityの30秒猶予が切れたら、権限予約を削除してwaiting-authorityになる
+{
+  const { ctx, room } = await newRoom();
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  const [authority, peer] = ctx.sockets;
+  await room.webSocketClose(authority, 1006);
+  const members = await ctx.storage.get('members');
+  members.p1.deadline = 1;
+  await ctx.storage.put('members', members);
+  await room.alarm();
+  assert.equal((await ctx.storage.get('members')).p1, undefined);
+  assert.equal(await ctx.storage.get('authorityId'), '');
+  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
+  assert.equal(peer.last('authority-left').id, 'p1');
+}
+
+// Authority側のP2Pオブジェクトが先に消えていても、猶予終了通知でプレイヤーを削除する
+{
+  const updates = [];
+  const session = new NetSession({ onPlayers: (list) => updates.push(list) });
+  session.isAuthority = true;
+  session.players.set('p1', { id: 'p1', name: 'Creator' });
+  session.players.set('p2', { id: 'p2', name: 'A' });
+  session._onWs(JSON.stringify({ t: 'peer-leave', id: 'p2' }));
+  assert.equal(session.players.has('p2'), false);
+  assert.equal(updates.at(-1).some((p) => p.id === 'p2'), false);
+}
+
+// Authority切断時、クライアント側の残留アバター用スナップショットをクリアする
+{
+  const snapshots = [], updates = [];
+  const session = new NetSession({
+    onPlayers: (list) => updates.push(list),
+    onSnapshot: (list) => snapshots.push(list)
+  });
+  session.isAuthority = false;
+  session.authorityId = 'p1';
+  session.players.set('p1', { id: 'p1', name: 'Creator' });
+  session._onWs(JSON.stringify({ t: 'authority-disconnected', id: 'p1' }));
+  assert.equal(session.players.has('p1'), false);
+  assert.deepEqual(snapshots.at(-1), []);
+  session._onWs(JSON.stringify({ t: 'authority-resume', id: 'p1', name: 'Creator' }));
+  assert.equal(session.players.has('p1'), true);
 }
 
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
