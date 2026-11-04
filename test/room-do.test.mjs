@@ -50,114 +50,89 @@ async function newRoom(env = {}) {
 const wsReq = (q) => req('/ws?' + q);
 const connect = async (room, q) => { const r = await room.fetch(wsReq(q)); return r; };
 
-// 1) ホスト: トークンが無い・違う人は入れない。正しい人が最初のホスト(p1)
+// 1) Room作成者の特権はなく、最初に接続したPeerが暫定Authorityになる
 {
   const { ctx, room } = await newRoom();
-  assert.equal((await connect(room, 'host=1&name=A')).status, 403);
-  assert.equal((await connect(room, 'host=1&token=WRONG')).status, 403);
-  const ok = await connect(room, 'host=1&token=TOKEN&name=Host');
+  const ok = await connect(room, 'authority=1&name=Creator');
   assert.equal(ok.status, 101);
-  const hello = ctx.sockets[0].last('hello');
-  assert.equal(hello.id, 'p1'); assert.equal(hello.host, true); assert.equal(hello.resumed, false);
+  const authority = ctx.sockets[0];
+  const hello = authority.last('hello');
+  assert.equal(hello.id, 'p1');
+  assert.equal(hello.authority, true);
+  assert.equal(hello.host, true, '既存のSession API互換のためhostフラグを維持');
   assert.equal(await ctx.storage.get('status'), 'running');
-  // ホスト待ちの間(= running になる前)は参加者を入れない、は別ケースで確認する。ここでは参加できる
-  const j = await connect(room, 'name=Taro');
-  assert.equal(j.status, 101);
-  assert.equal(ctx.sockets[1].last('hello').id, 'p2');
-  assert.equal(ctx.sockets[0].last('peer-join').id, 'p2'); // ホストへ通知
+  const join = await connect(room, 'name=Taro');
+  assert.equal(join.status, 101);
+  assert.equal(ctx.sockets[1].last('hello').authorityId, 'p1');
+  assert.equal(authority.last('peer-join').id, 'p2');
 }
 
-// 2) ホスト不在(waiting)の間は参加できない
+// 2) AuthorityがまだいないRoomには通常Peerは参加できない
 {
   const { room } = await newRoom();
   assert.equal((await connect(room, 'name=Taro')).status, 409);
 }
 
-// 3) ホストのWebSocketだけ切れた: すぐには終わらず、猶予の間は参加不可・再接続できる。再接続でP2P中の参加者の一覧が返る
+// 3) Authorityが退出しても、他のPeerが残っていればRoomとWebSocketを維持する
 {
   const { ctx, room } = await newRoom();
-  await connect(room, 'host=1&token=TOKEN&name=Host');
-  await connect(room, 'name=Taro');
-  const [host, taro] = ctx.sockets;
-  await room.webSocketClose(host, 1006);
-  assert.equal(await ctx.storage.get('status'), 'host-away');
-  assert.ok(ctx.alarm > Date.now() && ctx.alarm <= Date.now() + 46000);
-  assert.equal(taro.closed, null, '参加者は閉じられない(P2Pは続く)');
-  assert.equal((await connect(room, 'name=Late')).status, 409, '不在の間は新規参加不可');
-  assert.equal((await connect(room, 'host=1&token=WRONG')).status, 403);
-  const back = await connect(room, 'host=1&token=TOKEN&name=Host');
-  assert.equal(back.status, 101);
-  const hello = ctx.sockets[ctx.sockets.length - 1].last('hello');
-  assert.equal(hello.id, 'p1'); assert.equal(hello.resumed, true);
-  assert.deepEqual(hello.peers, [{ id: 'p2', name: 'Taro' }]);
-  assert.equal(await ctx.storage.get('status'), 'running');
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  await connect(room, 'name=B');
+  const [authority, a, b] = ctx.sockets;
+  await room.webSocketClose(authority, 1000);
+  assert.equal(await ctx.storage.get('status'), 'waiting-authority');
+  assert.equal(await ctx.storage.get('authorityId'), '');
+  assert.equal(a.closed, null);
+  assert.equal(b.closed, null);
+  assert.equal(a.last('authority-left').id, 'p1');
+  assert.equal(b.last('authority-left').id, 'p1');
+  const info = await (await room.fetch(req('/info'))).json();
+  assert.equal(info.players, 2);
+  assert.equal(info.authorityAvailable, false);
+  assert.equal((await connect(room, 'name=Late')).status, 409, 'Authority不在中は新規参加を保留');
 }
 
-// 4) 古い接続が残っていても(切れに気づく前)、正しいトークンなら入れ替わる。古い方のcloseは退出扱いにならない
+// 4) 通常Peerの退出は残りのPeerへ通知し、最後の退出でRoomを終了する
 {
   const { ctx, room } = await newRoom();
-  await connect(room, 'host=1&token=TOKEN');
-  const old = ctx.sockets[0];
-  await connect(room, 'host=1&token=TOKEN');
-  assert.deepEqual(old.closed, { code: 4000, reason: 'replaced' });
-  await room.webSocketClose(old, 4000);
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  await connect(room, 'name=B');
+  const [authority, a, b] = ctx.sockets;
+  await room.webSocketClose(a, 1000);
+  assert.equal(authority.last('peer-leave').id, 'p2');
+  assert.equal(b.last('peer-leave').id, 'p2');
+  await room.webSocketClose(b, 1000);
   assert.equal(await ctx.storage.get('status'), 'running');
-}
-
-// 5) 猶予が切れたら終了。参加者に通知して閉じる。終了後は参加不可
-{
-  const { ctx, room } = await newRoom();
-  await connect(room, 'host=1&token=TOKEN');
-  await connect(room, 'name=Taro');
-  const [host, taro] = ctx.sockets;
-  await room.webSocketClose(host, 1006);
-  await ctx.storage.put('graceUntil', Date.now() - 1); // 猶予が過ぎたことにする
-  await room.alarm();
+  await room.webSocketClose(authority, 1000);
   assert.equal(await ctx.storage.get('status'), 'closed');
-  assert.equal(taro.last('closed').reason, 'host-left');
-  assert.equal((await connect(room, 'name=Late')).status, 410);
-  await room.alarm(); // 片付け
-  assert.equal(ctx.store.size, 0);
 }
 
-// 6) ホストが自分から抜ける('close')と、猶予なしですぐ終了
+// 5) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
 {
   const { ctx, room } = await newRoom();
-  await connect(room, 'host=1&token=TOKEN');
-  await connect(room, 'name=Taro');
-  const [host, taro] = ctx.sockets;
-  await room.webSocketMessage(taro, JSON.stringify({ t: 'close' })); // 参加者が'close'を送っても無効
-  assert.equal(await ctx.storage.get('status'), 'running');
-  await room.webSocketMessage(host, JSON.stringify({ t: 'close' }));
-  assert.equal(await ctx.storage.get('status'), 'closed');
-  assert.equal(taro.last('closed').reason, 'host-left');
-}
-
-// 7) シグナリング: ホスト⇔参加者だけ。参加者同士は中継しない
-{
-  const { ctx, room } = await newRoom();
-  await connect(room, 'host=1&token=TOKEN');
-  await connect(room, 'name=A'); await connect(room, 'name=B');
-  const [host, a, b] = ctx.sockets;
-  await room.webSocketMessage(host, JSON.stringify({ t: 'signal', to: 'p2', data: { x: 1 } }));
+  await connect(room, 'authority=1&name=Creator');
+  for (let i = 0; i < 7; i++) assert.equal((await connect(room, 'name=P' + i)).status, 101);
+  assert.equal((await connect(room, 'name=Over')).status, 409);
+  const [authority, a, b] = ctx.sockets;
+  await room.webSocketMessage(authority, JSON.stringify({ t: 'signal', to: 'p2', data: { x: 1 } }));
   assert.deepEqual(a.last('signal'), { t: 'signal', from: 'p1', data: { x: 1 } });
   await room.webSocketMessage(a, JSON.stringify({ t: 'signal', to: 'p3', data: { x: 2 } }));
   assert.equal(b.last('signal'), undefined);
-  await room.webSocketMessage(a, JSON.stringify({ t: 'signal', to: 'p1', data: { y: 1 } }));
-  assert.equal(host.last('signal').from, 'p2');
 }
 
-// 8) 参加者のWebSocketが切れたらホストへ通知(P2P未成立のときの後始末用)。満員(8)で止まる
+// 6) 新規参加者の通知はAuthorityと既存Peer全員へ届く
 {
   const { ctx, room } = await newRoom();
-  await connect(room, 'host=1&token=TOKEN');
-  for (let i = 0; i < 7; i++) assert.equal((await connect(room, 'name=P' + i)).status, 101);
-  assert.equal((await connect(room, 'name=Over')).status, 409);
-  await room.webSocketClose(ctx.sockets[1], 1000);
-  assert.equal(ctx.sockets[0].last('peer-leave').id, 'p2');
+  await connect(room, 'authority=1&name=Creator');
+  await connect(room, 'name=A');
+  await connect(room, 'name=B');
+  assert.equal(ctx.sockets[0].last('peer-join').id, 'p3');
+  assert.equal(ctx.sockets[1].last('peer-join').id, 'p3');
 }
 
-// 9) ホストが来なかったRoomは、alarmで片付く(クールダウンなし)
+// 7) ホストが来なかったRoomはalarmで片付く(クールダウンなし)
 {
   const calls = [];
   const env = { DB: { prepare: (sql) => ({ bind: (...a) => ({ run: async () => { calls.push([sql, a]); return { meta: { changes: 1 } }; } }) }) } };
