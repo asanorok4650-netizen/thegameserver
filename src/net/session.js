@@ -106,6 +106,7 @@ export class NetSession {
     if (!this.resumeToken) { this._end('signal-lost'); return; }
     if (!this.reconnecting) {
       this.reconnecting = true;
+      clearInterval(this.timer); clearInterval(this.pingTimer); this.timer = null; this.pingTimer = null;
       this.reconnectDeadline = Date.now() + RECONNECT_GRACE_MS;
       this._status('接続が切れました。30秒以内に再接続します…');
       for (const peer of [...this.peers.values()]) {
@@ -334,7 +335,18 @@ export class NetSession {
     this.peers.clear();
     const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
     closePeers();
-    try { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'leave' })); this.ws?.close(1000); } catch (e) { /* 無視 */ }
+    try {
+      if (this.ws?.readyState === 1) {
+        this.ws.send(JSON.stringify({ t: 'leave' }));
+        this.ws.close(1000);
+      } else if (reason === 'left' && this.resumeToken) {
+        // 切断中にユーザーが明示退出した場合も、復帰用トークンで一度だけ接続して即時退出を通知する。
+        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + '&resume=' + encodeURIComponent(this.resumeToken);
+        const leaveWs = new WebSocket(url);
+        leaveWs.onopen = () => { try { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); } catch {} };
+        leaveWs.onerror = () => {};
+      }
+    } catch (e) { /* 無視 */ }
     if (!silent) this.o.onClosed?.(reason);
   }
 }
