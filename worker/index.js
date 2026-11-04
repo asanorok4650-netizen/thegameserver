@@ -316,10 +316,8 @@ export class Room {
       .filter(({ peer }) => peer && !peer.pendingResume && peer.id !== oldId && members[peer.id])
       .sort((a, b) => String(a.peer.id).localeCompare(String(b.peer.id), undefined, { numeric: true }));
     if (!candidates.length) {
-      await st.put({ members, authorityId: '', status: Object.keys(members).length ? 'waiting-authority' : 'closed' });
-      this._broadcast({ t: 'authority-unavailable', id: oldId, name: oldName });
-      if (!Object.keys(members).length) await this._closeRoom(true);
-      else await this._scheduleAlarm();
+      if (!Object.keys(members).length) { await st.put('members', members); await this._closeRoom(true); }
+      else { await st.put({ members, authorityId: '', status: 'waiting-authority' }); this._broadcast({ t: 'authority-unavailable', id: oldId, name: oldName }); await this._scheduleAlarm(); }
       return;
     }
     const { ws, peer } = candidates[0];
