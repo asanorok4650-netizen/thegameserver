@@ -149,7 +149,7 @@ export class NetSession {
     else if (m.t === 'peer-resume' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'peer-disconnected' && this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
     else if (m.t === 'peer-disconnected' && !this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
-    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const id = this.authorityId, p = this.peers.get(id); if (p) this._peerLost(p); this.players.delete(id); this._emitPlayers(); this.o.onSnapshot?.([]); this._status('ゲーム進行役が再接続中です…'); }
+    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const id = this.authorityId, p = this.peers.get(id); if (p) this._peerLost(p); this.authorityAvailable = false; this.authorityId = ''; this.players.delete(id); this._emitPlayers(); this.o.onSnapshot?.([]); this._status('ゲーム進行役が再接続中です…'); }
     else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this.players.set(this.authorityId, { id: this.authorityId, name: cleanName(m.name) }); this._emitPlayers(); this._status('ゲーム進行役に再接続中…'); }
     else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
     else if (m.t === 'peer-join' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
