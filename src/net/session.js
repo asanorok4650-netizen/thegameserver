@@ -1,8 +1,7 @@
-// P2Pマルチプレイのセッション(ブラウザ専用)。Host型Star: ホストが全員とWebRTCでつながり、状態を中継する。
-// Durable Object(worker/index.js の Room)はシグナリングと参加・退出の通知だけ。ゲームのデータは流さない。
-// - ホストが抜けたらRoom終了(ホスト交代なし)。ただしホストの「DOとのWebSocket」が一時的に切れただけなら、
-//   hostToken で再接続でき(猶予あり)、その間もP2Pは続く。
-// - 他プレイヤーの移動は各自が計算して送る(位置の表示と世界時刻の同期まで)。
+// P2Pマルチプレイのセッション(ブラウザ専用)。暫定Simulation AuthorityがStar型で状態を中継する。
+// Durable ObjectはRoomの存続・メンバー管理とシグナリングだけを担当し、ゲームデータは流さない。
+// Room作成者とSimulation Authorityは別概念。Authority退出後も他PeerはRoomに残るが、
+// Authorityの自動引き継ぎ・ゲーム状態の移行は後続段階で実装する。
 import { CONFIG } from '../config.js';
 import {
   ICE_SERVERS, DEFAULT_SEND_HZ, MAX_PLAYERS, PEER_TIMEOUT_MS, CTL_MAX_PER_SEC,
@@ -13,8 +12,6 @@ import { validGameMsg } from './appmsg.js';
 
 const base = () => CONFIG.apiBase.replace(/\/+$/, '');
 const P2P_TIMEOUT_MS = 15000;
-const HOST_RECONNECT_MS = 40000; // DO側の猶予(45秒)より短くする
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function roomRequest(path, options) {
   if (!base()) throw new Error('API_NOT_CONFIGURED');
@@ -29,7 +26,7 @@ async function roomRequest(path, options) {
   return body;
 }
 
-/** ルームを作る。{ roomId, hostToken } を返す(roomId = 6文字のコード。hostToken はホストの再接続用で、他人に見せない) */
+/** ルームを作る。{ roomId } を返す。Roomに所有者はいない */
 export const createRoom = (serverId) => roomRequest('/api/rooms', {
   method: 'POST',
   // 管理用の合言葉を設定している人は、作成の回数制限を受けない(開発・検証用)
@@ -39,8 +36,8 @@ export const createRoom = (serverId) => roomRequest('/api/rooms', {
 /** ルームの情報。{ serverId, status, players, max } */
 export const getRoomInfo = (code) => roomRequest(`/api/rooms/${code}/info`);
 
-const wsUrl = (code, name, asHost, token) => base().replace(/^http/, 'ws')
-  + `/api/rooms/${code}/ws?name=${encodeURIComponent(name)}${asHost ? '&host=1&token=' + encodeURIComponent(token || '') : ''}`;
+const wsUrl = (code, name, asAuthority) => base().replace(/^http/, 'ws')
+  + `/api/rooms/${code}/ws?name=${encodeURIComponent(name)}${asAuthority ? '&authority=1' : ''}`;
 
 export class NetSession {
   /**
@@ -60,7 +57,7 @@ export class NetSession {
     this.rtt = 0;
     this.seq = 0;        // ホスト: 送ったスナップショットの連番 / クライアント: 送った状態の連番
     this.lastSeq = -1;   // クライアント: 最後に採用したスナップショットの連番
-    this.reconnecting = false; this.resumeWait = null;
+    this.authorityAvailable = false;
   }
 
   connect() {
@@ -92,37 +89,17 @@ export class NetSession {
 
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
-    const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), this.o.asHost, this.o.token));
+    const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), this.o.asHost));
     this.ws = ws;
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
     ws.onclose = () => { if (this.ws === ws && !this.closed) this._onWsClosed(); };
   }
 
-  // クライアントは、P2Pが成立したらDOが切れても続行できる。
-  // ホストは、DOとの接続が切れたら(P2Pはそのままに)再接続を試み、だめなら終了する
+  // DOとのWebSocketが切れてもRoom全体の終了とはみなさない。
+  // 自分の接続が切れた場合だけ、このセッションを終了する。
   _onWsClosed() {
-    if (this.resumeWait) { const r = this.resumeWait; this.resumeWait = null; r(false); return; }
-    if (this.o.asHost && this.ready) this._reconnectHost();
-    else if (this.o.asHost || !this.ready) this._end('signal-lost');
-  }
-
-  async _reconnectHost() {
-    if (this.reconnecting) return;
-    this.reconnecting = true;
-    const deadline = performance.now() + HOST_RECONNECT_MS;
-    let delay = 500;
-    while (!this.closed && performance.now() < deadline) {
-      this._status('ホストの接続を再開中…');
-      await sleep(delay);
-      delay = Math.min(delay * 2, 5000);
-      if (this.closed) return;
-      try { if ((await getRoomInfo(this.code)).status === 'closed') break; } catch (e) { if (e.status === 404) break; }
-      const ok = await new Promise((resolve) => { this.resumeWait = resolve; this._openWs(); });
-      if (ok) { this.reconnecting = false; this._status('ホストとして待機中'); return; }
-    }
-    this.reconnecting = false;
-    this._end('signal-lost');
+    if (!this.closed) this._end('signal-lost');
   }
 
   _onWs(raw) {
@@ -130,7 +107,7 @@ export class NetSession {
     if (!m || typeof m !== 'object') return;
     if (m.t === 'hello') {
       if (m.host && this.ready) { this._onResumed(m); return; } // ホストの再接続
-      this.id = String(m.id); this.hostId = String(m.hostId); this.isHost = !!m.host;
+      this.id = String(m.id); this.hostId = String(m.authorityId || m.hostId || ''); this.isHost = !!(m.authority || m.host); this.authorityAvailable = !!this.hostId;
       if (this.isHost) {
         this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
         this.ready = true;
@@ -140,12 +117,20 @@ export class NetSession {
         this.o.onReady?.(this);
       } else this._status('ホストと通信を準備中…');
     } else if (m.t === 'peer-join' && this.isHost) this._hostAccept(String(m.id), cleanName(m.name));
+    else if (m.t === 'peer-join' && !this.isHost && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
+    else if (m.t === 'authority-left' && !this.isHost) {
+      const peer = this.peers.get(this.hostId);
+      if (peer) this._peerLost(peer);
+      this.authorityAvailable = false; this.hostId = '';
+      this.players.delete(String(m.id)); this._emitPlayers();
+      this._status('ゲーム進行役が退出しました。Roomは維持されています');
+    }
     else if (m.t === 'peer-leave' && this.isHost) {
       // 接続が成立済みの相手は、DOのWebSocketが切れてもP2Pが生きていれば続ける(切れたかどうかはP2P側の状態で決める)
       const p = this.peers.get(String(m.id));
       if (p && !p.ready) this._peerLost(p);
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
-    else if (m.t === 'closed') this._end(m.reason === 'host-left' ? 'host-left' : 'closed');
+    else if (m.t === 'closed') this._end('closed');
   }
 
   // 再接続できた。留守の間に参加・退出した人をDOの一覧と突き合わせる
@@ -308,20 +293,17 @@ export class NetSession {
     try { peer.pc.close(); } catch (e) { /* 無視 */ }
     if (this.isHost) {
       if (this.players.delete(peer.id)) { this._broadcastCtl({ t: 'leave', id: peer.id }); this._emitPlayers(); }
-    } else if (peer.id === this.hostId) this._end(failed ? 'p2p-failed' : 'host-left');
+    } else if (peer.id === this.hostId) {
+      this.authorityAvailable = false; this.hostId = '';
+      this._status('ゲーム進行役とのP2P接続が切れました。Roomには残っています');
+    }
   }
 
   _end(reason, silent = false) {
     if (this.closed) return;
     this.closed = true;
     clearInterval(this.timer); clearInterval(this.pingTimer);
-    if (reason === 'left') {
-      // 自分から抜けるとき: 相手とDOに知らせる(切断の検出や猶予を待たせない)
-      if (this.isHost) {
-        this._broadcastCtl({ t: 'host-bye' });
-        try { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'close' })); } catch (e) { /* 無視 */ }
-      } else this._sendCtl(this.peers.get(this.hostId), { t: 'bye' });
-    }
+    // Room退出はWebSocketを閉じるだけ。Roomを閉じる特別なPeerはいない。
     const peers = [...this.peers.values()];
     this.peers.clear();
     const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
