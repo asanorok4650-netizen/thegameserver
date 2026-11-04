@@ -246,6 +246,23 @@ const connect = async (room, q) => {
   assert.equal(await ctx.storage.get('status'), 'running');
 }
 
+
+// 元Authorityが通常Peerとして戻った後、別の新規参加者がAuthorityに選出される
+{
+  const { ctx, room } = await newRoom();
+  await connect(room, 'authority=1&name=Creator');
+  const authority = ctx.sockets[0];
+  await room.webSocketClose(authority, 1006);
+  const former = await connect(room, 'former=1&name=Creator');
+  assert.equal(former.status, 101);
+  assert.equal(ctx.sockets.at(-1).last('hello').authority, false);
+  const next = await connect(room, 'name=NewAuthority');
+  assert.equal(next.status, 101);
+  assert.equal(ctx.sockets.at(-1).last('hello').authority, true);
+  assert.equal(await ctx.storage.get('authorityId'), 'p3');
+  assert.equal(ctx.sockets[1].last('authority-changed').id, 'p3');
+}
+
 // 8) Authorityへのシグナリングだけ許可し、通常Peer同士の中継はしない。満員(8人)で止まる
 {
   const { ctx, room } = await newRoom();
