@@ -1,18 +1,25 @@
-// P2Pマルチプレイのセッション(ブラウザ専用)。暫定Simulation AuthorityがStar型で状態を中継する。
-// Durable ObjectはRoomの存続・メンバー管理とシグナリングだけを担当し、ゲームデータは流さない。
-// Room作成者とSimulation Authorityは別概念。Authority退出後も他PeerはRoomに残るが、
-// Authorityの自動引き継ぎ・ゲーム状態の移行は後続段階で実装する。
+// P2Pマルチプレイのセッション(ブラウザ専用)。ホストレス・フルメッシュ: 全員が対等で、お互いに直接WebRTCでつながる。
+// Durable Object(worker/index.js の Room)は、参加・退出の通知・SDP/ICEの中継・世界時刻の基準だけ。ゲームのデータは流さない。
+// - 接続の向き: 後から入った人は待つだけ。先にいた人が「新しい人」へofferを出す(両側が同時に出すことがない)。
+// - 位置は各自が計算して、16バイトのバイナリ(protocol.encodeState)で全員へ送る。受け取った側が補間して表示する。
+// - シグナリングのWebSocketが切れても、つながっている相手とのP2Pは続く。裏で再接続して(Roomが猶予を持つ)、新しい参加者も迎える。
+// - ゲームの内容(スクリプトの結果・HP・スコア)は同期しない。ホストがいないので、いまは位置と向きだけ。
 import { CONFIG } from '../config.js';
 import {
-  ICE_SERVERS, DEFAULT_SEND_HZ, MAX_PLAYERS, PEER_TIMEOUT_MS, CTL_MAX_PER_SEC,
-  encode, decode, cleanName, packState, validState, validSnapshot, validPlayers, validSeq
+  ICE_SERVERS, DEFAULT_SEND_HZ, MAX_PLAYERS, PEER_TIMEOUT_MS, CTL_MAX_PER_SEC, IDLE_HEARTBEAT_MS,
+  STATE_BODY_OFFSET, encode, decode, cleanName, encodeState, decodeState, seqNewer, validPlayers, joinOrder
 } from './protocol.js';
-import { ClockSync } from './clock.js';
-import { validGameMsg } from './appmsg.js';
+import { ServerClock } from './clock.js';
 
 const base = () => CONFIG.apiBase.replace(/\/+$/, '');
 const P2P_TIMEOUT_MS = 15000;
-const RECONNECT_GRACE_MS = 30000;
+const WS_RECONNECT_MS = 40000;     // Room側の猶予(45秒)より短くする
+const READY_FALLBACK_MS = 3000;    // 時計の最初の返事がこなくても、これだけ待てば参加済みにする
+const CLOCK_BURST = 6;             // 参加時に時計を合わせる往復の回数
+const CLOCK_BURST_GAP_MS = 150;
+const CLOCK_RESYNC_MS = 120000;    // その後、時々だけ合わせ直す(端末ごとの時計の進み方の違い)
+const CLOCK_RESYNC_BURST = 3;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function roomRequest(path, options) {
   if (!base()) throw new Error('API_NOT_CONFIGURED');
@@ -27,7 +34,7 @@ async function roomRequest(path, options) {
   return body;
 }
 
-/** ルームを作る。{ roomId } を返す。Roomに所有者はいない */
+/** ルームを作る。{ roomId } を返す(roomId = 6文字のコード) */
 export const createRoom = (serverId) => roomRequest('/api/rooms', {
   method: 'POST',
   // 管理用の合言葉を設定している人は、作成の回数制限を受けない(開発・検証用)
@@ -37,196 +44,163 @@ export const createRoom = (serverId) => roomRequest('/api/rooms', {
 /** ルームの情報。{ serverId, status, players, max } */
 export const getRoomInfo = (code) => roomRequest(`/api/rooms/${code}/info`);
 
-const wsUrl = (code, name, asAuthority) => base().replace(/^http/, 'ws')
-  + `/api/rooms/${code}/ws?name=${encodeURIComponent(name)}${asAuthority ? '&authority=1' : ''}`;
+const wsUrl = (code, name, resume) => base().replace(/^http/, 'ws')
+  + `/api/rooms/${code}/ws?name=${encodeURIComponent(name)}${resume ? `&id=${encodeURIComponent(resume.id)}&token=${encodeURIComponent(resume.token)}` : ''}`;
 
 export class NetSession {
   /**
-   * @param o { code, name, asAuthority, sendHz, getLocal:()=>[x,y,z,heading,speed,grounded], getTime:()=>秒(進行役の世界時刻),
-   *            onStatus(text), onReady(session), onPlayers([{id,name}]), onSnapshot([{id,name,s}]), onClosed(reason),
-   *            onGame(fromId, msg)(ゲーム内容のメッセージ。appmsg.validGameMsg を通ったものだけ) }
+   * @param o { code, name, sendHz, getLocal:()=>[x,y,z,heading,speed,grounded],
+   *            onStatus(text), onReady(session), onPlayers([{id,name}]), onSnapshot([{id,name,s}]), onClosed(reason) }
+   *   onSnapshot は送信と同じ間隔で、いま見えている他のプレイヤー全員の最新の位置を渡す(載っていない人は消えた人)。
    */
   constructor(o) {
     this.o = o;
     this.code = o.code;
     this.sendHz = Math.min(30, Math.max(5, Number(o.sendHz) || DEFAULT_SEND_HZ));
     this.ws = null;
-    this.id = ''; this.authorityId = ''; this.isAuthority = false; this.ready = false; this.closed = false;
-    this.peers = new Map(); this.players = new Map();
-    this.timer = null; this.pingTimer = null;
-    this.sync = new ClockSync();
-    this.rtt = 0;
-    this.seq = 0;        // Authority: 送ったスナップショットの連番 / 通常Peer: 送った状態の連番
-    this.lastSeq = -1;   // 通常Peer: 最後に採用したスナップショットの連番
-    this.authorityAvailable = false;
-    this.resumeToken = ''; this.reconnectTimer = null; this.reconnectDeadline = 0; this.reconnecting = false; this.formerAuthority = false;
+    this.id = ''; this.token = ''; this.ready = false; this.closed = false;
+    this.known = new Map();  // Roomが知っている、自分以外の参加者 id → name
+    this.peers = new Map();  // WebRTCの相手 id → peer
+    this.clock = new ServerClock();
+    this.timer = null; this.clockTimer = null; this.readyTimer = null;
+    this.seq = 0;
+    this.lastBody = null; this.lastSentAt = 0;
+    this.resumeWait = null; this.reconnecting = false; this.failedNotified = false;
   }
 
   connect() {
     this._status('接続中…');
-    this._openWs();
+    this._openWs(null);
   }
 
   leave() { this._end('left', true); }
 
-  // ゲーム内容のメッセージ(appmsg.js)。制御チャネル(信頼・順序あり)で送る
-  /** Simulation Authority: 1人へ */
-  sendGame(id, msg) { if (this.isAuthority) this._sendCtl(this.peers.get(id), msg); }
-  /** Simulation Authority: 全員へ */
-  broadcastGame(msg) { if (this.isAuthority) this._broadcastCtl(msg); }
-  /** 通常Peer: Simulation Authorityへ */
-  sendGameToHost(msg) { if (!this.isAuthority) this._sendCtl(this.peers.get(this.authorityId), msg); }
+  /** 世界時刻(秒)の推定値。まだ分からなければ null */
+  getNetTime() { return this.clock.time(); }
 
-  /** ホストの世界時刻(秒)の推定値。クライアントのみ。まだ分からなければ null */
-  getNetTime() { return this.sync.time(); }
+  /** 自分を含む、いま確認できている参加者 [{id,name}] */
+  playerList() {
+    const list = [{ id: this.id, name: cleanName(this.o.name) }];
+    for (const p of this.peers.values()) if (p.ready) list.push({ id: p.id, name: p.name });
+    return list;
+  }
 
   _status(t) { this.o.onStatus?.(t); }
-  _emitPlayers() { this.o.onPlayers?.([...this.players.values()]); }
-  _emitSnapshot(list) {
-    this.o.onSnapshot?.(list.filter((e) => e.id !== this.id).map((e) => ({ id: e.id, name: this.players.get(e.id)?.name || 'Player', s: e.s })));
-  }
+  _emitPlayers() { if (this.ready && !this.closed) this.o.onPlayers?.(this.playerList()); }
   _signal(to, data) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'signal', to, data })); }
   _sendCtl(peer, msg) { if (peer?.ctl.readyState === 'open') peer.ctl.send(encode(msg)); }
-  _broadcastCtl(msg, exceptId) { for (const p of this.peers.values()) if (p.ready && p.id !== exceptId) this._sendCtl(p, msg); }
 
-  // ── DO(シグナリング)とのWebSocket ──
-  _openWs() {
-    const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
-    const ws = new WebSocket(url + (this.formerAuthority ? '&former=1' : '') + (this.resumeToken ? '&resume=1' : ''));
+  // ── Room(シグナリング)とのWebSocket ──
+  _openWs(resume) {
+    const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), resume));
     this.ws = ws;
-    ws.onopen = () => { if (this.ws === ws && this.resumeToken && this.reconnecting) ws.send(JSON.stringify({ t: 'resume', token: this.resumeToken })); };
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
     ws.onclose = () => { if (this.ws === ws && !this.closed) this._onWsClosed(); };
   }
 
-  // DOとのWebSocketが切れてもRoom全体の終了とはみなさない。
-  // 自分の接続が切れた場合だけ、このセッションを終了する。
+  // 参加前に切れたら失敗。参加後は、P2Pはそのまま続けて、裏で再接続する
   _onWsClosed() {
-    if (this.closed) return;
-    if (!this.resumeToken) { this._end('signal-lost'); return; }
-    if (!this.reconnecting) {
-      this.reconnecting = true;
-      clearInterval(this.timer); clearInterval(this.pingTimer); this.timer = null; this.pingTimer = null;
-      this.reconnectDeadline = Date.now() + RECONNECT_GRACE_MS;
-      this._status('接続が切れました。30秒以内に再接続します…');
-      for (const peer of [...this.peers.values()]) {
-        peer.gone = true; clearTimeout(peer.timer);
-        try { peer.pc.close(); } catch {}
-      }
-      this.peers.clear();
+    if (this.resumeWait) { const r = this.resumeWait; this.resumeWait = null; r(false); return; }
+    if (!this.ready) this._end('signal-lost');
+    else this._reconnectWs();
+  }
+
+  async _reconnectWs() {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    const deadline = performance.now() + WS_RECONNECT_MS;
+    let delay = 500;
+    while (!this.closed && performance.now() < deadline) {
+      await sleep(delay);
+      delay = Math.min(delay * 2, 5000);
+      if (this.closed) return;
+      try { await getRoomInfo(this.code); } catch (e) { if (e.status === 404) break; } // Roomが無くなっていたら諦める
+      const ok = await new Promise((resolve) => { this.resumeWait = resolve; this._openWs({ id: this.id, token: this.token }); });
+      if (ok) { this.reconnecting = false; return; }
     }
-    if (Date.now() >= this.reconnectDeadline) { this._end('signal-lost'); return; }
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => { if (!this.closed) this._openWs(); }, 1000);
+    this.reconnecting = false;
+    if (!this.closed) this._status('サーバーとの接続が切れました(いまいる人とは続けられますが、新しい参加者は迎えられません)');
   }
 
   _onWs(raw) {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
-    if (m.t === 'resume-error') {
-      // Authorityは切断時点で権限を失っている。resumeせず、新しい通常Peerとして参加し直す。
-      if (this.reconnecting && !this.closed) {
-        this.resumeToken = ''; this.reconnecting = false; this.o.asAuthority = false; this.formerAuthority = true;
-        clearTimeout(this.reconnectTimer); this._status('通常プレイヤーとして再参加中…');
-        this._openWs();
-      } else this._end('signal-lost');
-      return;
-    }
-    if (m.t === 'authority-elected' || m.t === 'authority-changed') {
-      const previousId = String(m.previousId || this.authorityId || '');
-      clearInterval(this.timer); clearInterval(this.pingTimer); this.timer = null; this.pingTimer = null;
-      for (const peer of this.peers.values()) { peer.gone = true; clearTimeout(peer.timer); try { peer.pc.close(); } catch {} }
-      this.peers.clear();
-      this.players.delete(previousId);
-      const roster = Array.isArray(m.peers) ? m.peers.filter((p) => p && typeof p.id === 'string') : [];
-      this.authorityId = String(m.id);
-      this.authorityAvailable = true;
-      if (m.t === 'authority-elected') {
-        this.isAuthority = true; this.ready = true;
-        this.players = new Map(roster.map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
-        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
-        this._emitPlayers(); this._startTimer();
-        for (const p of roster) this._authorityAccept(String(p.id), cleanName(p.name));
-        this._status('ゲーム進行役を引き継ぎました');
-        this.o.onReady?.(this);
-      } else {
-        this.isAuthority = false; this.ready = false;
-        this.players = new Map(roster.map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
-        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
-        this._emitPlayers(); this.o.onSnapshot?.([]);
-        this._status('新しいゲーム進行役に接続中…');
-      }
-      return;
-    }
     if (m.t === 'hello') {
-      if (typeof m.resumeToken === 'string') this.resumeToken = m.resumeToken;
-      this.reconnecting = false; this.formerAuthority = false; clearTimeout(this.reconnectTimer);
-      this.id = String(m.id); this.authorityId = String(m.authorityId || m.hostId || ''); this.isAuthority = !!(m.authority || m.host); this.authorityAvailable = !!this.authorityId;
-      if (this.isAuthority) {
-        this.players = new Map((Array.isArray(m.peers) ? m.peers : []).filter((p) => p && typeof p.id === 'string').map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
-        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
-        if (m.resumed || m.promoted) for (const p of m.peers || []) this._authorityAccept(String(p.id), cleanName(p.name));
-        this.ready = true;
-        this._emitPlayers();
-        this._startTimer();
-        this._status('ゲーム進行役として待機中');
-        this.o.onReady?.(this);
-      } else {
-        const peers = Array.isArray(m.peers) ? m.peers : [];
-        this.players = new Map(peers.filter((p) => p && typeof p.id === 'string').map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
-        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
-        this._emitPlayers();
-        this._status('ゲーム進行役と通信を準備中…');
-      }
-    } else if (m.t === 'peer-resume' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
-    else if (m.t === 'peer-resume' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
-    else if (m.t === 'peer-disconnected' && this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
-    else if (m.t === 'peer-disconnected' && !this.isAuthority) { const p = this.peers.get(String(m.id)); if (p) this._peerLost(p, false, true); }
-    else if (m.t === 'authority-disconnected' && !this.isAuthority) { const id = this.authorityId, p = this.peers.get(id); if (p) this._peerLost(p); this.authorityAvailable = false; this.authorityId = ''; this.players.delete(id); this._emitPlayers(); this.o.onSnapshot?.([]); this._status('ゲーム進行役が再接続中です…'); }
-    else if (m.t === 'authority-resume' && !this.isAuthority) { this.authorityId = String(m.id); this.authorityAvailable = true; this.players.set(this.authorityId, { id: this.authorityId, name: cleanName(m.name) }); this._emitPlayers(); this._status('ゲーム進行役に再接続中…'); }
-    else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
-    else if (m.t === 'peer-join' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
-    else if (m.t === 'authority-left' && !this.isAuthority) {
-      const peer = this.peers.get(this.authorityId);
-      if (peer) this._peerLost(peer);
-      this.authorityAvailable = false; this.authorityId = '';
-      this.players.delete(String(m.id)); this._emitPlayers();
-      if (!this.ready) {
-        this.ready = true; this._startTimer(); this.o.onReady?.(this);
-      }
-      this._status('ゲーム進行役が退出しました。Roomは維持されています');
-    }
-    else if (m.t === 'peer-leave' && this.isAuthority) {
-      const id = String(m.id), p = this.peers.get(id);
-      if (p) this._peerLost(p);
-      else if (this.players.delete(id)) { this._broadcastCtl({ t: 'leave', id }); this._emitPlayers(); }
-    } else if (m.t === 'peer-leave' && !this.isAuthority) {
-      this.players.delete(String(m.id)); this._emitPlayers();
+      if (m.resumed && this.ready) { this._onResumed(m); return; }
+      this.id = String(m.id); this.token = String(m.token || '');
+      this.known = new Map((validPlayers(m.peers) || []).map((p) => [p.id, p.name]));
+      this._status('他のプレイヤーと通信を準備中…');
+      this._startClockSync();
+      this.readyTimer = setTimeout(() => this._becomeReady(), READY_FALLBACK_MS);
+    } else if (m.t === 'peer-join') {
+      const id = String(m.id); const name = cleanName(m.name);
+      if (id === this.id) return;
+      this.known.set(id, name);
+      this._offerTo(id, name); // 後から入った人へ、先にいた人からofferを出す
+    } else if (m.t === 'peer-leave') {
+      const id = String(m.id);
+      this.known.delete(id);
+      const p = this.peers.get(id);
+      if (p && !p.ready) this._peerLost(p); // 接続が成立済みの相手は、P2Pが生きていれば続ける
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
+    else if (m.t === 'time') { if (Number.isFinite(m.c) && Number.isFinite(m.s)) { this.clock.sample(m.c, m.s); this._becomeReady(); } }
     else if (m.t === 'closed') this._end('closed');
   }
 
-  _makePeer(id, name = '') {
+  // 再接続できた。留守の間に入った人(自分より後に入った人)へofferを出し、消えた人の接続途中の分を片付ける
+  _onResumed(m) {
+    const list = validPlayers(m.peers) || [];
+    const ids = new Set(list.map((p) => p.id));
+    this.known = new Map(list.map((p) => [p.id, p.name]));
+    for (const p of list) if (!this.peers.has(p.id)) this._offerTo(p.id, p.name);
+    for (const peer of [...this.peers.values()]) if (!peer.ready && !ids.has(peer.id)) this._peerLost(peer);
+    const r = this.resumeWait; this.resumeWait = null; r?.(true);
+  }
+
+  // ── 世界時刻 ──
+  _pingClock() { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'time', c: performance.now() })); }
+  _burstClock(n) { for (let i = 0; i < n; i++) setTimeout(() => { if (!this.closed) this._pingClock(); }, i * CLOCK_BURST_GAP_MS); }
+  _startClockSync() {
+    this._burstClock(CLOCK_BURST);
+    clearInterval(this.clockTimer);
+    this.clockTimer = setInterval(() => this._burstClock(CLOCK_RESYNC_BURST), CLOCK_RESYNC_MS);
+  }
+
+  _becomeReady() {
+    if (this.ready || this.closed || !this.id) return;
+    clearTimeout(this.readyTimer);
+    this.ready = true;
+    this.timer = setInterval(() => this._tick(), 1000 / this.sendHz);
+    this._status('参加しました');
+    this.o.onReady?.(this);
+    this._emitPlayers();
+  }
+
+  // ── WebRTC ──
+  _makePeer(id, name) {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     // 両側で同じidを指定して作る(negotiated)ので、offer/answerの順序に依存しない
     const ctl = pc.createDataChannel('ctl', { negotiated: true, id: 0 });
     const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 });
+    st.binaryType = 'arraybuffer';
     const now = performance.now();
     const peer = { id, name, pc, ctl, st, pending: [], remoteSet: false, ready: false, gone: false, state: null, lastRx: 0, rxSeq: -1, lastSeen: now, ctlWindow: now, ctlCount: 0, timer: null };
     pc.onicecandidate = (e) => { if (e.candidate) this._signal(id, { c: e.candidate.toJSON() }); };
-    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this._peerLost(peer); };
+    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this._peerLost(peer, true); };
     ctl.onopen = () => this._onCtlOpen(peer);
     ctl.onclose = () => this._peerLost(peer);
     ctl.onmessage = (e) => this._onCtl(peer, decode(e.data));
-    st.onmessage = (e) => this._onSt(peer, decode(e.data));
+    st.onmessage = (e) => this._onSt(peer, e.data);
     peer.timer = setTimeout(() => { if (!peer.ready) this._peerLost(peer, true); }, P2P_TIMEOUT_MS);
     this.peers.set(id, peer);
     return peer;
   }
 
-  async _authorityAccept(id, name) {
-    if (this.peers.has(id) || this.peers.size >= MAX_PLAYERS - 1) return; // ホストの分を除いた上限
+  // 自分より後に入った相手にだけofferを出す(順番の小さいほうが出す)
+  async _offerTo(id, name) {
+    if (this.peers.has(id) || this.peers.size >= MAX_PLAYERS - 1) return;
+    if (!(joinOrder(id) > joinOrder(this.id))) return;
     const peer = this._makePeer(id, name);
     try {
       await peer.pc.setLocalDescription(await peer.pc.createOffer());
@@ -240,7 +214,11 @@ export class NetSession {
     let peer = this.peers.get(from);
     try {
       if (data.sdp && (data.sdp.type === 'offer' || data.sdp.type === 'answer') && typeof data.sdp.sdp === 'string') {
-        if (!peer) { if (this.isAuthority || from !== this.authorityId) return; peer = this._makePeer(from); } // 通常PeerはAuthorityのofferでPCを作る
+        if (!peer) {
+          // offerを受けるのは、自分より先に入っていて、Roomが参加者として教えてくれた相手だけ
+          if (data.sdp.type !== 'offer' || !this.known.has(from) || !(joinOrder(from) < joinOrder(this.id)) || this.peers.size >= MAX_PLAYERS - 1) return;
+          peer = this._makePeer(from, this.known.get(from));
+        }
         await peer.pc.setRemoteDescription({ type: data.sdp.type, sdp: data.sdp.sdp });
         peer.remoteSet = true;
         for (const c of peer.pending.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
@@ -260,12 +238,7 @@ export class NetSession {
     clearTimeout(peer.timer);
     peer.ready = true;
     peer.lastSeen = performance.now();
-    if (this.isAuthority) {
-      this.players.set(peer.id, { id: peer.id, name: peer.name });
-      this._sendCtl(peer, { t: 'welcome', id: peer.id, players: [...this.players.values()], h: this.o.getTime?.() ?? 0 });
-      this._broadcastCtl({ t: 'join', id: peer.id, name: peer.name }, peer.id);
-      this._emitPlayers();
-    }
+    this._emitPlayers();
   }
 
   _onCtl(peer, m) {
@@ -274,124 +247,68 @@ export class NetSession {
     peer.lastSeen = now;
     if (now - peer.ctlWindow > 1000) { peer.ctlWindow = now; peer.ctlCount = 0; }
     if (++peer.ctlCount > CTL_MAX_PER_SEC) return; // 制御メッセージの送りすぎは捨てる
-    if (m.t === 'ping') { this._sendCtl(peer, { t: 'pong', c: m.c }); return; }
-    if (m.t === 'g') { // Authorityは参加者から、参加者はAuthorityからだけ受け取る(検証を通ったものだけ)
-      const g = validGameMsg(m, !this.isAuthority);
-      if (g) this.o.onGame?.(this.isAuthority ? peer.id : this.authorityId, g);
-      return;
-    }
-    if (this.isAuthority) {
-      if (m.t === 'bye') this._peerLost(peer); // 相手が自分から抜けた(切断の検出を待たずに済む)
-      return;
-    }
-    if (m.t === 'welcome') {
-      if (!this.authorityAvailable) return;
-      const list = validPlayers(m.players);
-      if (!list) return;
-      this.players = new Map(list.map((p) => [p.id, p]));
-      this.ready = true;
-      if (Number.isFinite(m.h)) this.sync.sample(m.h); // 最初のスナップショットを待たずに時計を合わせる
-      this._emitPlayers();
-      this._startTimer();
-      this.pingTimer = setInterval(() => this._sendCtl(this.peers.get(this.authorityId), { t: 'ping', c: performance.now() }), 2000);
-      this._status('参加しました');
-      this.o.onReady?.(this);
-    } else if (m.t === 'join' && typeof m.id === 'string' && this.players.size < MAX_PLAYERS) {
-      this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers();
-    } else if (m.t === 'leave' && typeof m.id === 'string') {
-      this.players.delete(m.id); this._emitPlayers();
-    } else if (m.t === 'pong' && Number.isFinite(m.c)) {
-      const rtt = performance.now() - m.c;
-      this.rtt = this.rtt ? this.rtt * 0.7 + rtt * 0.3 : rtt;
-      this.sync.setRtt(this.rtt);
-    }
+    if (m.t === 'bye') this._peerLost(peer);       // 相手が自分から抜けた(切断の検出を待たずに済む)
   }
 
-  _onSt(peer, m) {
-    if (!m) return;
+  _onSt(peer, data) {
+    const d = decodeState(data);
+    if (!d) return;
     const now = performance.now();
     peer.lastSeen = now;
-    if (this.isAuthority) {
-      if (m.t !== 's') return;
-      if (now - peer.lastRx < 1000 / (this.sendHz * 4)) return; // 送りすぎは捨てる
-      if (!validSeq(m.n) || m.n <= peer.rxSeq) return;          // 順序が入れ替わった古い状態は使わない
-      const s = validState(m.s);
-      if (s) { peer.lastRx = now; peer.rxSeq = m.n; peer.state = s; }
-    } else if (m.t === 'S') {
-      const list = validSnapshot(m);
-      if (!list || m.n <= this.lastSeq) return;                 // 古いスナップショットで位置や時計が戻らないようにする
-      this.lastSeq = m.n;
-      this.sync.sample(m.h);
-      this._emitSnapshot(list);
-    }
-  }
-
-  _startTimer() {
-    this.timer = setInterval(() => this._tick(), 1000 / this.sendHz);
+    if (now - peer.lastRx < 1000 / (this.sendHz * 4)) return;      // 送りすぎは捨てる
+    if (peer.rxSeq >= 0 && !seqNewer(d.seq, peer.rxSeq)) return;   // 順序が入れ替わった古い状態は使わない
+    peer.lastRx = now; peer.rxSeq = d.seq; peer.state = d.s;
   }
 
   _tick() {
     const now = performance.now();
-    const raw = this.o.getLocal?.();
-    const mine = raw ? validState(packState(raw)) : null;
-    if (this.isAuthority) {
-      for (const p of [...this.peers.values()]) if (p.ready && now - p.lastSeen > PEER_TIMEOUT_MS) this._peerLost(p, true); // 無通信の相手を外す
-      const list = [];
-      if (mine) list.push({ id: this.id, s: mine });
-      for (const p of this.peers.values()) if (p.state) list.push({ id: p.id, s: p.state });
-      const msg = encode({ t: 'S', n: ++this.seq, h: Math.round((this.o.getTime?.() ?? 0) * 1000) / 1000, p: list.map((e) => [e.id, ...e.s]) });
-      for (const p of this.peers.values()) if (p.ready && p.st.readyState === 'open' && p.st.bufferedAmount < 16384) p.st.send(msg);
-      this._emitSnapshot(list);
-    } else if (this.ready) {
-      const h = this.peers.get(this.authorityId);
-      if (h && now - h.lastSeen > PEER_TIMEOUT_MS) { this._peerLost(h, true); return; } // Authorityから何も届かない
-      if (mine && h?.st.readyState === 'open') h.st.send(encode({ t: 's', n: ++this.seq, s: mine }));
+    for (const p of [...this.peers.values()]) if (p.ready && now - p.lastSeen > PEER_TIMEOUT_MS) this._peerLost(p, true); // 無通信の相手を外す
+
+    // 自分の状態を全員へ。止まっている間は間隔を空ける(動いたらすぐ送る)
+    const pkt = encodeState(this.seq, this.o.getLocal?.());
+    if (pkt) {
+      const body = new Uint8Array(pkt, STATE_BODY_OFFSET);
+      const same = this.lastBody && body.every((b, i) => b === this.lastBody[i]);
+      if (!same || now - this.lastSentAt >= IDLE_HEARTBEAT_MS) {
+        this.seq = (this.seq + 1) & 0xffff;
+        this.lastBody = body.slice(); this.lastSentAt = now;
+        for (const p of this.peers.values()) if (p.ready && p.st.readyState === 'open' && p.st.bufferedAmount < 16384) p.st.send(pkt);
+      }
     }
+
+    const list = [];
+    for (const p of this.peers.values()) if (p.ready && p.state) list.push({ id: p.id, name: p.name, s: p.state });
+    this.o.onSnapshot?.(list);
   }
 
-  _peerLost(peer, failed = false, preservePlayer = false) {
+  _peerLost(peer, failed = false) {
     if (!peer || peer.gone) return;
     peer.gone = true;
     clearTimeout(peer.timer);
+    const wasReady = peer.ready;
     this.peers.delete(peer.id);
     try { peer.pc.close(); } catch (e) { /* 無視 */ }
-    if (this.isAuthority) {
-      if (!preservePlayer && this.players.delete(peer.id)) { this._broadcastCtl({ t: 'leave', id: peer.id }); this._emitPlayers(); }
-    } else if (peer.id === this.authorityId) {
-      this.authorityAvailable = false; this.authorityId = '';
-      this._status('ゲーム進行役とのP2P接続が切れました。Roomには残っています');
+    if (wasReady) this._emitPlayers();
+    else if (failed && !this.closed && !this.failedNotified) {
+      // 一部の相手とだけ直接つながらなかった(回線の都合)。他の相手とは続けられる
+      this.failedNotified = true;
+      this._status('直接つながらなかった相手がいます(回線の都合の可能性があります)');
     }
   }
 
   _end(reason, silent = false) {
     if (this.closed) return;
     this.closed = true;
-    clearInterval(this.timer); clearInterval(this.pingTimer); clearTimeout(this.reconnectTimer);
-    // Room退出はWebSocketを閉じるだけ。Roomを閉じる特別なPeerはいない。
+    clearInterval(this.timer); clearInterval(this.clockTimer); clearTimeout(this.readyTimer);
     const peers = [...this.peers.values()];
+    // 自分から抜けるとき: 相手に知らせる(切断の検出を待たせない)
+    if (reason === 'left') for (const p of peers) this._sendCtl(p, { t: 'bye' });
     this.peers.clear();
     const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
-    closePeers();
-    try {
-      if (this.ws?.readyState === 1) {
-        this.ws.send(JSON.stringify({ t: 'leave' }));
-        this.ws.close(1000);
-      } else if (reason === 'left' && this.resumeToken) {
-        // 切断中にユーザーが明示退出した場合も、復帰用トークンで一度だけ接続して即時退出を通知する。
-        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + '&resume=1';
-        const leaveWs = new WebSocket(url);
-        leaveWs.onopen = () => {
-          try {
-            leaveWs.send(JSON.stringify({ t: 'resume', token: this.resumeToken }));
-            leaveWs.onmessage = (event) => {
-              let message; try { message = JSON.parse(event.data); } catch { return; }
-              if (message.t === 'hello') { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); }
-            };
-          } catch {}
-        };
-        leaveWs.onerror = () => {};
-      }
-    } catch (e) { /* 無視 */ }
+    if (reason === 'left') setTimeout(closePeers, 250); // 送った'bye'が届く前にチャネルを閉じない
+    else closePeers();
+    if (this.resumeWait) { const r = this.resumeWait; this.resumeWait = null; r(false); }
+    try { this.ws?.close(1000); } catch (e) { /* 無視 */ }
     if (!silent) this.o.onClosed?.(reason);
   }
 }
