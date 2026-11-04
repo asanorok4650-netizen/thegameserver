@@ -270,7 +270,6 @@ export class Room {
       server.serializeAttachment({ id, name, authority: false });
       await st.put('seq', seq);
       server.send(JSON.stringify({ t: 'hello', id, host: false, authorityId, hostId: authorityId, max: ROOM_MAX }));
-      this._byId(authorityId)?.send(JSON.stringify({ t: 'peer-join', id, name }));
       this._broadcast({ t: 'peer-join', id, name }, id);
       await st.setAlarm(Date.now() + ROOM_TTL_MS);
       return new Response(null, { status: 101, webSocket: client });
@@ -310,11 +309,10 @@ export class Room {
     const st = this.ctx.storage;
     if (me.authority) {
       if ((await st.get('authorityId')) === me.id) {
-        await st.put({ authorityId: '', status: this.ctx.getWebSockets().length ? 'waiting-authority' : 'closed' });
+        await st.put({ authorityId: '', status: 'waiting-authority' });
         this._broadcast({ t: 'authority-left', id: me.id });
       }
     } else {
-      this._byId(await st.get('authorityId'))?.send(JSON.stringify({ t: 'peer-leave', id: me.id }));
       this._broadcast({ t: 'peer-leave', id: me.id }, me.id);
     }
     if (this.ctx.getWebSockets().length === 0) await this._closeRoom(true);
