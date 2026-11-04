@@ -166,7 +166,7 @@ export class NetSession {
       if (this.isAuthority) {
         this.players = new Map((Array.isArray(m.peers) ? m.peers : []).filter((p) => p && typeof p.id === 'string').map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
         this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
-        if (m.resumed) for (const p of m.peers || []) this._authorityAccept(String(p.id), cleanName(p.name));
+        if (m.resumed || m.promoted) for (const p of m.peers || []) this._authorityAccept(String(p.id), cleanName(p.name));
         this.ready = true;
         this._emitPlayers();
         this._startTimer();
