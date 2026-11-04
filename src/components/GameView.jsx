@@ -115,7 +115,6 @@ export default function GameView({ server, desc, playerName, onExit }) {
     room_active: 'このネットワークからのルームがまだ残っています。終了してから作り直してください'
   };
   const NET_CLOSED = {
-    'host-left': 'ゲーム進行役との接続が終了しました',
     'p2p-failed': 'ホストと直接つながりませんでした(回線の都合の可能性があります)',
     'signal-lost': '接続が切れました',
     closed: 'ルームは終了しました'
@@ -137,15 +136,15 @@ export default function GameView({ server, desc, playerName, onExit }) {
         if (info.players >= info.max) throw new Error('FULL');
       }
       const s = new NetSession({
-        code, asHost: create, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
+        code, asAuthority: create, name: playerName || CONFIG.lastUser || 'Player', sendHz: sendHzRef.current,
         getLocal: () => game.getNetState(),
         getTime: () => game.worldTime(),
         onStatus: (t) => setNetMsg(t),
         onReady: (sess) => {
-          setNetRoom({ code, host: sess.isHost });
-          if (!sess.isHost) game.netClock = () => sess.getNetTime();
+          setNetRoom({ code, authority: sess.isAuthority });
+          if (!sess.isAuthority) game.netClock = () => sess.getNetTime();
           // ホストがスクリプトを動かし、結果をクライアントへ配る。クライアントはスクリプトを動かさない
-          game.setNet(sess.isHost ? 'host' : 'client', sess.id, {
+          game.setNet(sess.isAuthority ? 'host' : 'client', sess.id, {
             sendTo: (id, m) => sess.sendGame(id, m), broadcast: (m) => sess.broadcastGame(m), sendToHost: (m) => sess.sendGameToHost(m)
           });
         },
@@ -253,8 +252,8 @@ export default function GameView({ server, desc, playerName, onExit }) {
             <>
               <div className="net-label">ルームコード</div>
               <div className="net-code">{netRoom.code}</div>
-              <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.host && p.id === sessionRef.current?.id ? '(進行役)' : ''}</li>)}</ul>
-              {netRoom.host && <div className="net-note">あなたはゲーム進行役です。退出後も他の参加者のRoomは維持されます</div>}
+              <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.authority && p.id === sessionRef.current?.id ? '(進行役)' : ''}</li>)}</ul>
+              {netRoom.authority && <div className="net-note">あなたはゲーム進行役です。退出後も他の参加者のRoomは維持されます</div>}
               <button className="net-btn net-leave" onClick={leaveRoom}>ルームを出る</button>
             </>
           )}

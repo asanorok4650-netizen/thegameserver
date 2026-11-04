@@ -41,7 +41,7 @@ const wsUrl = (code, name, asAuthority) => base().replace(/^http/, 'ws')
 
 export class NetSession {
   /**
-   * @param o { code, name, asHost, token(ホストのみ), sendHz, getLocal:()=>[x,y,z,heading,speed,grounded], getTime:()=>秒(ホストの世界時刻),
+   * @param o { code, name, asAuthority, sendHz, getLocal:()=>[x,y,z,heading,speed,grounded], getTime:()=>秒(進行役の世界時刻),
    *            onStatus(text), onReady(session), onPlayers([{id,name}]), onSnapshot([{id,name,s}]), onClosed(reason),
    *            onGame(fromId, msg)(ゲーム内容のメッセージ。appmsg.validGameMsg を通ったものだけ) }
    */
@@ -50,7 +50,7 @@ export class NetSession {
     this.code = o.code;
     this.sendHz = Math.min(30, Math.max(5, Number(o.sendHz) || DEFAULT_SEND_HZ));
     this.ws = null;
-    this.id = ''; this.hostId = ''; this.isHost = false; this.ready = false; this.closed = false;
+    this.id = ''; this.authorityId = ''; this.isAuthority = false; this.ready = false; this.closed = false;
     this.peers = new Map(); this.players = new Map();
     this.timer = null; this.pingTimer = null;
     this.sync = new ClockSync();
@@ -69,11 +69,11 @@ export class NetSession {
 
   // ゲーム内容のメッセージ(appmsg.js)。制御チャネル(信頼・順序あり)で送る
   /** ホスト: 1人へ */
-  sendGame(id, msg) { if (this.isHost) this._sendCtl(this.peers.get(id), msg); }
+  sendGame(id, msg) { if (this.isAuthority) this._sendCtl(this.peers.get(id), msg); }
   /** ホスト: 全員へ */
-  broadcastGame(msg) { if (this.isHost) this._broadcastCtl(msg); }
+  broadcastGame(msg) { if (this.isAuthority) this._broadcastCtl(msg); }
   /** クライアント: ホストへ */
-  sendGameToHost(msg) { if (!this.isHost) this._sendCtl(this.peers.get(this.hostId), msg); }
+  sendGameToHost(msg) { if (!this.isAuthority) this._sendCtl(this.peers.get(this.authorityId), msg); }
 
   /** ホストの世界時刻(秒)の推定値。クライアントのみ。まだ分からなければ null */
   getNetTime() { return this.sync.time(); }
@@ -89,7 +89,7 @@ export class NetSession {
 
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
-    const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), this.o.asHost));
+    const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority));
     this.ws = ws;
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
     ws.onerror = () => {};
@@ -106,8 +106,8 @@ export class NetSession {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
     if (m.t === 'hello') {
-      this.id = String(m.id); this.hostId = String(m.authorityId || m.hostId || ''); this.isHost = !!(m.authority || m.host); this.authorityAvailable = !!this.hostId;
-      if (this.isHost) {
+      this.id = String(m.id); this.authorityId = String(m.authorityId || m.hostId || ''); this.isAuthority = !!(m.authority || m.host); this.authorityAvailable = !!this.authorityId;
+      if (this.isAuthority) {
         this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
         this.ready = true;
         this._emitPlayers();
@@ -121,22 +121,22 @@ export class NetSession {
         this._emitPlayers();
         this._status('ホストと通信を準備中…');
       }
-    } else if (m.t === 'peer-join' && this.isHost) this._hostAccept(String(m.id), cleanName(m.name));
-    else if (m.t === 'peer-join' && !this.isHost && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
-    else if (m.t === 'authority-left' && !this.isHost) {
-      const peer = this.peers.get(this.hostId);
+    } else if (m.t === 'peer-join' && this.isAuthority) this._authorityAccept(String(m.id), cleanName(m.name));
+    else if (m.t === 'peer-join' && !this.isAuthority && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
+    else if (m.t === 'authority-left' && !this.isAuthority) {
+      const peer = this.peers.get(this.authorityId);
       if (peer) this._peerLost(peer);
-      this.authorityAvailable = false; this.hostId = '';
+      this.authorityAvailable = false; this.authorityId = '';
       this.players.delete(String(m.id)); this._emitPlayers();
       if (!this.ready) {
         this.ready = true; this._startTimer(); this.o.onReady?.(this);
       }
       this._status('ゲーム進行役が退出しました。Roomは維持されています');
     }
-    else if (m.t === 'peer-leave' && this.isHost) {
+    else if (m.t === 'peer-leave' && this.isAuthority) {
       const p = this.peers.get(String(m.id));
       if (p && !p.ready) this._peerLost(p);
-    } else if (m.t === 'peer-leave' && !this.isHost) {
+    } else if (m.t === 'peer-leave' && !this.isAuthority) {
       this.players.delete(String(m.id)); this._emitPlayers();
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
     else if (m.t === 'closed') this._end('closed');
@@ -160,7 +160,7 @@ export class NetSession {
     return peer;
   }
 
-  async _hostAccept(id, name) {
+  async _authorityAccept(id, name) {
     if (this.peers.has(id) || this.peers.size >= MAX_PLAYERS - 1) return; // ホストの分を除いた上限
     const peer = this._makePeer(id, name);
     try {
@@ -175,7 +175,7 @@ export class NetSession {
     let peer = this.peers.get(from);
     try {
       if (data.sdp && (data.sdp.type === 'offer' || data.sdp.type === 'answer') && typeof data.sdp.sdp === 'string') {
-        if (!peer) { if (this.isHost || from !== this.hostId) return; peer = this._makePeer(from); } // クライアントはホストのofferでPCを作る
+        if (!peer) { if (this.isAuthority || from !== this.authorityId) return; peer = this._makePeer(from); } // クライアントはホストのofferでPCを作る
         await peer.pc.setRemoteDescription({ type: data.sdp.type, sdp: data.sdp.sdp });
         peer.remoteSet = true;
         for (const c of peer.pending.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
@@ -195,7 +195,7 @@ export class NetSession {
     clearTimeout(peer.timer);
     peer.ready = true;
     peer.lastSeen = performance.now();
-    if (this.isHost) {
+    if (this.isAuthority) {
       this.players.set(peer.id, { id: peer.id, name: peer.name });
       this._sendCtl(peer, { t: 'welcome', id: peer.id, players: [...this.players.values()], h: this.o.getTime?.() ?? 0 });
       this._broadcastCtl({ t: 'join', id: peer.id, name: peer.name }, peer.id);
@@ -211,15 +211,16 @@ export class NetSession {
     if (++peer.ctlCount > CTL_MAX_PER_SEC) return; // 制御メッセージの送りすぎは捨てる
     if (m.t === 'ping') { this._sendCtl(peer, { t: 'pong', c: m.c }); return; }
     if (m.t === 'g') { // ホストは参加者から、参加者はホストからだけ受け取る(検証を通ったものだけ)
-      const g = validGameMsg(m, !this.isHost);
-      if (g) this.o.onGame?.(this.isHost ? peer.id : this.hostId, g);
+      const g = validGameMsg(m, !this.isAuthority);
+      if (g) this.o.onGame?.(this.isAuthority ? peer.id : this.authorityId, g);
       return;
     }
-    if (this.isHost) {
+    if (this.isAuthority) {
       if (m.t === 'bye') this._peerLost(peer); // 相手が自分から抜けた(切断の検出を待たずに済む)
       return;
     }
     if (m.t === 'welcome') {
+      if (!this.authorityAvailable) return;
       const list = validPlayers(m.players);
       if (!list) return;
       this.players = new Map(list.map((p) => [p.id, p]));
@@ -227,7 +228,7 @@ export class NetSession {
       if (Number.isFinite(m.h)) this.sync.sample(m.h); // 最初のスナップショットを待たずに時計を合わせる
       this._emitPlayers();
       this._startTimer();
-      this.pingTimer = setInterval(() => this._sendCtl(this.peers.get(this.hostId), { t: 'ping', c: performance.now() }), 2000);
+      this.pingTimer = setInterval(() => this._sendCtl(this.peers.get(this.authorityId), { t: 'ping', c: performance.now() }), 2000);
       this._status('参加しました');
       this.o.onReady?.(this);
     } else if (m.t === 'join' && typeof m.id === 'string' && this.players.size < MAX_PLAYERS) {
@@ -245,7 +246,7 @@ export class NetSession {
     if (!m) return;
     const now = performance.now();
     peer.lastSeen = now;
-    if (this.isHost) {
+    if (this.isAuthority) {
       if (m.t !== 's') return;
       if (now - peer.lastRx < 1000 / (this.sendHz * 4)) return; // 送りすぎは捨てる
       if (!validSeq(m.n) || m.n <= peer.rxSeq) return;          // 順序が入れ替わった古い状態は使わない
@@ -268,7 +269,7 @@ export class NetSession {
     const now = performance.now();
     const raw = this.o.getLocal?.();
     const mine = raw ? validState(packState(raw)) : null;
-    if (this.isHost) {
+    if (this.isAuthority) {
       for (const p of [...this.peers.values()]) if (p.ready && now - p.lastSeen > PEER_TIMEOUT_MS) this._peerLost(p, true); // 無通信の相手を外す
       const list = [];
       if (mine) list.push({ id: this.id, s: mine });
@@ -277,7 +278,7 @@ export class NetSession {
       for (const p of this.peers.values()) if (p.ready && p.st.readyState === 'open' && p.st.bufferedAmount < 16384) p.st.send(msg);
       this._emitSnapshot(list);
     } else if (this.ready) {
-      const h = this.peers.get(this.hostId);
+      const h = this.peers.get(this.authorityId);
       if (h && now - h.lastSeen > PEER_TIMEOUT_MS) { this._peerLost(h, true); return; } // ホストから何も届かない
       if (mine && h?.st.readyState === 'open') h.st.send(encode({ t: 's', n: ++this.seq, s: mine }));
     }
@@ -289,10 +290,10 @@ export class NetSession {
     clearTimeout(peer.timer);
     this.peers.delete(peer.id);
     try { peer.pc.close(); } catch (e) { /* 無視 */ }
-    if (this.isHost) {
+    if (this.isAuthority) {
       if (this.players.delete(peer.id)) { this._broadcastCtl({ t: 'leave', id: peer.id }); this._emitPlayers(); }
-    } else if (peer.id === this.hostId) {
-      this.authorityAvailable = false; this.hostId = '';
+    } else if (peer.id === this.authorityId) {
+      this.authorityAvailable = false; this.authorityId = '';
       this._status('ゲーム進行役とのP2P接続が切れました。Roomには残っています');
     }
   }
