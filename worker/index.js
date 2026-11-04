@@ -266,7 +266,8 @@ export class Room {
     if (url.pathname.endsWith('/ws')) {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
       if (status === 'closed') return new Response('closed', { status: 410 });
-      if (url.searchParams.get('resume')) return this._resumePeer(url, st);
+      const resumeProtocol = request.headers.get('Sec-WebSocket-Protocol') || '';
+      if (resumeProtocol.startsWith('rbxl-resume.')) return this._resumePeer(st, resumeProtocol);
       if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
       if (status === 'waiting') return new Response('no_authority', { status: 409 });
       if (status === 'waiting-authority') return new Response('authority_unavailable', { status: 409 });
@@ -307,8 +308,8 @@ export class Room {
     server.send(JSON.stringify({ t: 'hello', id, host: true, authority: true, hostId: id, authorityId: id, max: ROOM_MAX, resumeToken, resumed: false, peers }));
     return new Response(null, { status: 101, webSocket: client });
   }
-  async _resumePeer(url, st) {
-    const token = url.searchParams.get('resume') || '';
+  async _resumePeer(st, resumeProtocol) {
+    const token = resumeProtocol.slice('rbxl-resume.'.length);
     if (!/^[a-f0-9]{64}$/.test(token)) return new Response('invalid_resume', { status: 401 });
     const hash = await tokenHash(token), members = (await st.get('members')) || {};
     const member = Object.values(members).find((m) => m.tokenHash === hash);
@@ -327,7 +328,7 @@ export class Room {
     if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
     else this._broadcast({ t: 'peer-resume', id: member.id, name: member.name }, member.id);
     await this._scheduleAlarm();
-    return new Response(null, { status: 101, webSocket: client });
+    return new Response(null, { status: 101, webSocket: client, headers: { 'Sec-WebSocket-Protocol': resumeProtocol } });
   }
   async _scheduleAlarm() {
     const st = this.ctx.storage, members = (await st.get('members')) || {};
