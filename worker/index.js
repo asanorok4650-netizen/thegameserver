@@ -268,7 +268,7 @@ export class Room {
       if (url.searchParams.get('resume') === '1') return this._acceptResumeSocket();
       if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
       if (status === 'waiting') return new Response('no_authority', { status: 409 });
-      if (status !== 'running') return new Response('closed', { status: 410 });
+      if (status !== 'running' && status !== 'waiting-authority') return new Response('closed', { status: 410 });
       if (Object.keys((await st.get('members')) || {}).length >= ROOM_MAX) return new Response('full', { status: 409 });
       const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
       const promote = status === 'waiting-authority' && url.searchParams.get('former') !== '1';
