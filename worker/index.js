@@ -268,7 +268,8 @@ export class Room {
       this.ctx.acceptWebSocket(server);
       server.serializeAttachment({ id, name, authority: false });
       await st.put('seq', seq);
-      server.send(JSON.stringify({ t: 'hello', id, host: false, authorityId, hostId: authorityId, max: ROOM_MAX }));
+      const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
+      server.send(JSON.stringify({ t: 'hello', id, host: false, authorityId, hostId: authorityId, max: ROOM_MAX, peers }));
       this._broadcast({ t: 'peer-join', id, name }, id);
       await st.setAlarm(Date.now() + ROOM_TTL_MS);
       return new Response(null, { status: 101, webSocket: client });

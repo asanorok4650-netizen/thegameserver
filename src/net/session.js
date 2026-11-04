@@ -114,7 +114,13 @@ export class NetSession {
         this._startTimer();
         this._status('ホストとして待機中');
         this.o.onReady?.(this);
-      } else this._status('ホストと通信を準備中…');
+      } else {
+        const peers = Array.isArray(m.peers) ? m.peers : [];
+        this.players = new Map(peers.filter((p) => p && typeof p.id === 'string').map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
+        this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
+        this._emitPlayers();
+        this._status('ホストと通信を準備中…');
+      }
     } else if (m.t === 'peer-join' && this.isHost) this._hostAccept(String(m.id), cleanName(m.name));
     else if (m.t === 'peer-join' && !this.isHost && typeof m.id === 'string') { this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers(); }
     else if (m.t === 'authority-left' && !this.isHost) {
@@ -122,6 +128,9 @@ export class NetSession {
       if (peer) this._peerLost(peer);
       this.authorityAvailable = false; this.hostId = '';
       this.players.delete(String(m.id)); this._emitPlayers();
+      if (!this.ready) {
+        this.ready = true; this._startTimer(); this.o.onReady?.(this);
+      }
       this._status('ゲーム進行役が退出しました。Roomは維持されています');
     }
     else if (m.t === 'peer-leave' && this.isHost) {
@@ -296,8 +305,7 @@ export class NetSession {
     const peers = [...this.peers.values()];
     this.peers.clear();
     const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
-    if (reason === 'left') setTimeout(closePeers, 250); // 送った'bye'が届く前にチャネルを閉じない
-    else closePeers();
+    closePeers();
     try { this.ws?.close(1000); } catch (e) { /* 無視 */ }
     if (!silent) this.o.onClosed?.(reason);
   }
