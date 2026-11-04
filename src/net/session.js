@@ -106,7 +106,6 @@ export class NetSession {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
     if (m.t === 'hello') {
-      if (m.host && this.ready) { this._onResumed(m); return; } // ホストの再接続
       this.id = String(m.id); this.hostId = String(m.authorityId || m.hostId || ''); this.isHost = !!(m.authority || m.host); this.authorityAvailable = !!this.hostId;
       if (this.isHost) {
         this.players.set(this.id, { id: this.id, name: cleanName(this.o.name) });
@@ -132,15 +131,6 @@ export class NetSession {
       this.players.delete(String(m.id)); this._emitPlayers();
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
     else if (m.t === 'closed') this._end('closed');
-  }
-
-  // 再接続できた。留守の間に参加・退出した人をDOの一覧と突き合わせる
-  _onResumed(m) {
-    const list = Array.isArray(m.peers) ? m.peers.slice(0, MAX_PLAYERS) : [];
-    const ids = new Set(list.map((p) => String(p && p.id)));
-    for (const p of list) if (p && typeof p.id === 'string' && !this.peers.has(p.id)) this._hostAccept(p.id, cleanName(p.name));
-    for (const peer of [...this.peers.values()]) if (!peer.ready && !ids.has(peer.id)) this._peerLost(peer); // 接続途中のまま消えた人
-    const r = this.resumeWait; this.resumeWait = null; r?.(true);
   }
 
   _makePeer(id, name = '') {
@@ -235,8 +225,6 @@ export class NetSession {
       this.players.set(m.id, { id: m.id, name: cleanName(m.name) }); this._emitPlayers();
     } else if (m.t === 'leave' && typeof m.id === 'string') {
       this.players.delete(m.id); this._emitPlayers();
-    } else if (m.t === 'host-bye') {
-      this._end('host-left');
     } else if (m.t === 'pong' && Number.isFinite(m.c)) {
       const rtt = performance.now() - m.c;
       this.rtt = this.rtt ? this.rtt * 0.7 + rtt * 0.3 : rtt;
@@ -310,7 +298,6 @@ export class NetSession {
     const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
     if (reason === 'left') setTimeout(closePeers, 250); // 送った'bye'が届く前にチャネルを閉じない
     else closePeers();
-    if (this.resumeWait) { const r = this.resumeWait; this.resumeWait = null; r(false); }
     try { this.ws?.close(1000); } catch (e) { /* 無視 */ }
     if (!silent) this.o.onClosed?.(reason);
   }
