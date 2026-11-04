@@ -124,6 +124,7 @@ export class NetSession {
   _onWs(raw) {
     let m; try { m = JSON.parse(raw); } catch (e) { return; }
     if (!m || typeof m !== 'object') return;
+    if (m.t === 'resume-error') { this._end('signal-lost'); return; }
     if (m.t === 'hello') {
       if (typeof m.resumeToken === 'string') this.resumeToken = m.resumeToken;
       this.reconnecting = false; clearTimeout(this.reconnectTimer);
@@ -342,9 +343,17 @@ export class NetSession {
         this.ws.close(1000);
       } else if (reason === 'left' && this.resumeToken) {
         // 切断中にユーザーが明示退出した場合も、復帰用トークンで一度だけ接続して即時退出を通知する。
-        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
-        const leaveWs = new WebSocket(url, ['rbxl-resume.' + this.resumeToken]);
-        leaveWs.onopen = () => { try { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); } catch {} };
+        const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority) + '&resume=1';
+        const leaveWs = new WebSocket(url);
+        leaveWs.onopen = () => {
+          try {
+            leaveWs.send(JSON.stringify({ t: 'resume', token: this.resumeToken }));
+            leaveWs.onmessage = (event) => {
+              let message; try { message = JSON.parse(event.data); } catch { return; }
+              if (message.t === 'hello') { leaveWs.send(JSON.stringify({ t: 'leave' })); leaveWs.close(1000); }
+            };
+          } catch {}
+        };
         leaveWs.onerror = () => {};
       }
     } catch (e) { /* 無視 */ }
