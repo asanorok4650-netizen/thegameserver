@@ -132,7 +132,6 @@ export default function GameView({ server, desc, playerName, onExit }) {
         const info = await getRoomInfo(code);
         if (info.serverId !== server.id) throw new Error('OTHER_SERVER');
         if (info.status === 'closed') throw new Error('CLOSED');
-        if (info.status === 'waiting-authority') throw new Error('AUTHORITY_UNAVAILABLE');
         if (info.players >= info.max) throw new Error('FULL');
       }
       const s = new NetSession({
@@ -142,7 +141,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
         onStatus: (t) => setNetMsg(t),
         onReady: (sess) => {
           setNetRoom({ code, authority: sess.isAuthority });
-          if (!sess.isAuthority) game.netClock = () => sess.getNetTime();
+          game.netClock = sess.isAuthority ? null : () => sess.getNetTime();
           // Simulation Authorityがスクリプトを動かし、結果を他Peerへ配る
           game.setNet(sess.isAuthority ? 'host' : 'client', sess.id, {
             sendTo: (id, m) => sess.sendGame(id, m), broadcast: (m) => sess.broadcastGame(m), sendToHost: (m) => sess.sendGameToHost(m)
@@ -253,7 +252,7 @@ export default function GameView({ server, desc, playerName, onExit }) {
               <div className="net-label">ルームコード</div>
               <div className="net-code">{netRoom.code}</div>
               <ul className="net-players">{netPlayers.map((p) => <li key={p.id}>{p.name}{netRoom.authority && p.id === sessionRef.current?.id ? '(進行役)' : ''}</li>)}</ul>
-              {netRoom.authority && <div className="net-note">あなたはゲーム進行役です。退出後も他の参加者のRoomは維持されます</div>}
+              {netRoom.authority && <div className="net-note">あなたはゲーム進行役です。切断時は接続中の参加者へ自動で引き継がれます</div>}
               <button className="net-btn net-leave" onClick={leaveRoom}>ルームを出る</button>
             </>
           )}

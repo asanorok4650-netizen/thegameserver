@@ -330,11 +330,14 @@ export class Game {
   // ── マルチプレイ(M2-B): ホストがスクリプトを動かし、結果をクライアントへ配る ──
   // net: { sendTo(id, msg), broadcast(msg), sendToHost(msg) }(GameView が NetSession を包んで渡す)
   setNet(role, localId, net) {
+    const previousRole = this.netRole;
     this.netRole = role === 'host' || role === 'client' ? role : 'solo';
     this.localId = localId || 'local';
     this.net = net || null;
     this.players.clear();
     this._partOut.clear();
+    // クライアント時に停止したスクリプトを、Authorityへ昇格したタイミングで再構築する。
+    if (previousRole === 'client' && this.netRole === 'host' && this.world) this._createUnifiedRuntime();
     if (this.netRole === 'client') {
       // クライアントはスクリプトを動かさない(ホストの結果だけを受け取る)。1人プレイ中に変えたパーツはホストの状態に合わせ直される
       this.scriptRuntime?.stop?.(); this.scriptRuntime = null;
