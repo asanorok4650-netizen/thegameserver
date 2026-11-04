@@ -268,7 +268,7 @@ export class Room {
       if (url.searchParams.get('resume') === '1') return this._acceptResumeSocket();
       if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
       if (status === 'waiting') return new Response('no_authority', { status: 409 });
-      if (status === 'waiting-authority') return new Response('authority_unavailable', { status: 409 });
+      if (status === 'waiting-authority' && url.searchParams.get('former') !== '1') return new Response('authority_unavailable', { status: 409 });
       if (status !== 'running') return new Response('closed', { status: 410 });
       if (Object.keys((await st.get('members')) || {}).length >= ROOM_MAX) return new Response('full', { status: 409 });
       const authorityId = await st.get('authorityId');
@@ -360,13 +360,16 @@ export class Room {
         return;
       }
       member.deadline = 0;
+      const promote = !member.authority && !(await this.ctx.storage.get('authorityId')) && (await this.ctx.storage.get('status')) === 'waiting-authority';
+      if (promote) member.authority = true;
       members[member.id] = member;
       ws.serializeAttachment({ id: member.id, name: member.name, authority: member.authority, resumeTokenHash: hash });
       await this.ctx.storage.put({ members, ...(member.authority ? { status: 'running', authorityId: member.id } : {}) });
       const active = this.ctx.getWebSockets().map((sock) => sock.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== member.id);
       const authorityId = await this.ctx.storage.get('authorityId');
       ws.send(JSON.stringify({ t: 'hello', id: member.id, name: member.name, authority: member.authority, host: member.authority, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken: m.token, resumed: true, peers: active.map((p) => ({ id: p.id, name: p.name })) }));
-      if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
+      if (promote) this._broadcast({ t: 'authority-changed', id: member.id, name: member.name, previousId: '', previousName: '', peers: active.map((p) => ({ id: p.id, name: p.name })) }, member.id);
+      else if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
       else this._broadcast({ t: 'peer-resume', id: member.id, name: member.name }, member.id);
       await this._scheduleAlarm();
       return;
