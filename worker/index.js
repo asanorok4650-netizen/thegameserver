@@ -19,6 +19,15 @@ const FORMATS = ['rbxl', 'rbxlx', 'tgw'];
 
 // ── マルチプレイ(Hybrid P2P)。DOはRoomの状態とWebRTCのシグナリングだけを扱う ──
 const ROOM_MAX = 8;
+const RECONNECT_GRACE_MS = 30 * 1000;
+function newResumeToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function tokenHash(token) {
+  return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token)));
+}
+
 const ROOM_TTL_MS = 60 * 60 * 1000;      // 参加者がいなければ1時間で片付ける
 const UNUSED_ROOM_MS = 60 * 1000;        // 作ったのにホストが来ないRoomは1分で片付ける
 const ROOM_CLOSED_KEEP_MS = 60 * 1000;
@@ -244,7 +253,7 @@ export class Room {
     if (url.pathname === '/init' && request.method === 'POST') {
       if (await st.get('serverId')) return this._res({ error: 'exists' }, 409);
       const b = await request.json();
-      await st.put({ serverId: b.serverId, code: b.code || '', ipHash: b.ipHash || '', status: 'waiting', authorityId: '', createdAt: Date.now() });
+      await st.put({ serverId: b.serverId, code: b.code || '', ipHash: b.ipHash || '', status: 'waiting', authorityId: '', members: {}, createdAt: Date.now() });
       await st.setAlarm(Date.now() + UNUSED_ROOM_MS);
       return this._res({ ok: true });
     }
@@ -252,24 +261,28 @@ export class Room {
     if (!serverId) return this._res({ error: 'not_found' }, 404);
     const status = await st.get('status');
     if (url.pathname.endsWith('/info')) {
-      return this._res({ serverId, status, players: this.ctx.getWebSockets().length, max: ROOM_MAX, authorityAvailable: !!(await st.get('authorityId')) });
+      return this._res({ serverId, status, players: this.ctx.getWebSockets().length, max: ROOM_MAX, authorityAvailable: this.ctx.getWebSockets().some((ws) => ws.deserializeAttachment()?.authority) });
     }
     if (url.pathname.endsWith('/ws')) {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected websocket', { status: 426 });
       if (status === 'closed') return new Response('closed', { status: 410 });
+      if (url.searchParams.get('resume')) return this._resumePeer(url, st);
       if (url.searchParams.get('authority') === '1') return this._acceptAuthority(url, st, status);
       if (status === 'waiting') return new Response('no_authority', { status: 409 });
       if (status === 'waiting-authority') return new Response('authority_unavailable', { status: 409 });
       if (status !== 'running') return new Response('closed', { status: 410 });
-      if (this.ctx.getWebSockets().length >= ROOM_MAX) return new Response('full', { status: 409 });
+      if (Object.keys((await st.get('members')) || {}).length >= ROOM_MAX) return new Response('full', { status: 409 });
       const authorityId = await st.get('authorityId');
       const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
       const pair = new WebSocketPair(), [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ id, name, authority: false });
-      await st.put('seq', seq);
+      const resumeToken = newResumeToken();
+      server.serializeAttachment({ id, name, authority: false, resumeTokenHash: await tokenHash(resumeToken) });
+      const members = (await st.get('members')) || {};
+      members[id] = { id, name, authority: false, tokenHash: await tokenHash(resumeToken), deadline: 0 };
+      await st.put({ seq, members });
       const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
-      server.send(JSON.stringify({ t: 'hello', id, host: false, authorityId, hostId: authorityId, max: ROOM_MAX, peers }));
+      server.send(JSON.stringify({ t: 'hello', id, host: false, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken, resumed: false, peers }));
       this._broadcast({ t: 'peer-join', id, name }, id);
       await st.setAlarm(Date.now() + ROOM_TTL_MS);
       return new Response(null, { status: 101, webSocket: client });
@@ -284,39 +297,84 @@ export class Room {
     const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));
     const pair = new WebSocketPair(), [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ id, name, authority: true });
-    await st.put({ status: 'running', authorityId: id, seq });
+    const resumeToken = newResumeToken();
+    server.serializeAttachment({ id, name, authority: true, resumeTokenHash: await tokenHash(resumeToken) });
+    const members = (await st.get('members')) || {};
+    members[id] = { id, name, authority: true, tokenHash: await tokenHash(resumeToken), deadline: 0 };
+    await st.put({ status: 'running', authorityId: id, seq, members });
     await st.setAlarm(Date.now() + ROOM_TTL_MS);
     const peers = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== id).map((p) => ({ id: p.id, name: p.name }));
-    server.send(JSON.stringify({ t: 'hello', id, host: true, authority: true, hostId: id, authorityId: id, max: ROOM_MAX, resumed: false, peers }));
+    server.send(JSON.stringify({ t: 'hello', id, host: true, authority: true, hostId: id, authorityId: id, max: ROOM_MAX, resumeToken, resumed: false, peers }));
     return new Response(null, { status: 101, webSocket: client });
   }
-  // WebRTCシグナリングは暫定Authorityと各Peerの間だけを中継する。
+  async _resumePeer(url, st) {
+    const token = url.searchParams.get('resume') || '';
+    if (!/^[a-f0-9]{64}$/.test(token)) return new Response('invalid_resume', { status: 401 });
+    const hash = await tokenHash(token), members = (await st.get('members')) || {};
+    const member = Object.values(members).find((m) => m.tokenHash === hash);
+    if (!member) return new Response('invalid_resume', { status: 401 });
+    if (!member.deadline) return new Response('already_connected', { status: 409 });
+    if (member.deadline < Date.now()) return new Response('resume_expired', { status: 410 });
+    if (this._byId(member.id)) return new Response('already_connected', { status: 409 });
+    const pair = new WebSocketPair(), [client, server] = Object.values(pair);
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ id: member.id, name: member.name, authority: member.authority, resumeTokenHash: hash });
+    member.deadline = 0; members[member.id] = member;
+    const active = this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()).filter((p) => p && p.id !== member.id);
+    await st.put({ members, ...(member.authority ? { status: 'running', authorityId: member.id } : {}) });
+    const authorityId = await st.get('authorityId');
+    server.send(JSON.stringify({ t: 'hello', id: member.id, name: member.name, authority: member.authority, host: member.authority, authorityId, hostId: authorityId, max: ROOM_MAX, resumeToken: token, resumed: true, peers: active.map((p) => ({ id: p.id, name: p.name })) }));
+    if (member.authority) this._broadcast({ t: 'authority-resume', id: member.id, name: member.name }, member.id);
+    else this._broadcast({ t: 'peer-resume', id: member.id, name: member.name }, member.id);
+    await this._scheduleAlarm();
+    return new Response(null, { status: 101, webSocket: client });
+  }
+  async _scheduleAlarm() {
+    const st = this.ctx.storage, members = (await st.get('members')) || {};
+    const deadlines = Object.values(members).map((m) => m.deadline).filter((n) => n > 0);
+    await st.setAlarm(deadlines.length ? Math.min(...deadlines) : Date.now() + ROOM_TTL_MS);
+  }
   async webSocketMessage(ws, message) {
     if (typeof message !== 'string' || message.length > MAX_SIGNAL_CHARS) return;
     let m; try { m = JSON.parse(message); } catch { return; }
     if (!m || typeof m !== 'object') return;
     const me = ws.deserializeAttachment();
-    if (!me || m.t !== 'signal' || typeof m.to !== 'string') return;
+    if (!me) return;
+    if (m.t === 'leave') {
+      ws.serializeAttachment({ ...me, intentional: true });
+      const st = this.ctx.storage, members = (await st.get('members')) || {};
+      delete members[me.id];
+      if (me.authority && (await st.get('authorityId')) === me.id) {
+        await st.put({ members, status: 'waiting-authority', authorityId: '' });
+        this._broadcast({ t: 'authority-left', id: me.id });
+      } else {
+        await st.put('members', members);
+        this._broadcast({ t: 'peer-leave', id: me.id }, me.id);
+      }
+      try { ws.close(1000, 'left'); } catch {}
+      if (Object.keys(members).length === 0) await this._closeRoom(true);
+      else await this._scheduleAlarm();
+      return;
+    }
+    if (m.t !== 'signal' || typeof m.to !== 'string') return;
     const target = this._byId(m.to), other = target?.deserializeAttachment();
     if (!other || (!me.authority && !other.authority)) return;
     target.send(JSON.stringify({ t: 'signal', from: me.id, data: m.data }));
   }
   async webSocketClose(ws, code) {
     const me = ws.deserializeAttachment();
-    try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'closed'); } catch { /* 閉じ済み */ }
-    if (!me || me.replaced || (await this.ctx.storage.get('status')) === 'closed') return;
-    const st = this.ctx.storage;
+    try { ws.close(code && code !== 1005 && code !== 1006 ? code : 1000, 'closed'); } catch {}
+    if (!me || me.replaced || me.intentional || (await this.ctx.storage.get('status')) === 'closed') return;
+    const st = this.ctx.storage, members = (await st.get('members')) || {}, member = members[me.id];
+    if (!member) return;
+    member.deadline = Date.now() + RECONNECT_GRACE_MS;
+    members[me.id] = member;
+    await st.put('members', members);
     if (me.authority) {
-      if ((await st.get('authorityId')) === me.id) {
-        await st.put({ authorityId: '', status: 'waiting-authority' });
-        this._broadcast({ t: 'authority-left', id: me.id });
-      }
-    } else {
-      this._broadcast({ t: 'peer-leave', id: me.id }, me.id);
-    }
-    if (this.ctx.getWebSockets().length === 0) await this._closeRoom(true);
-    else await st.setAlarm(Date.now() + ROOM_TTL_MS);
+      await st.put('status', 'waiting-authority');
+      this._broadcast({ t: 'authority-disconnected', id: me.id, deadline: member.deadline });
+    } else this._broadcast({ t: 'peer-disconnected', id: me.id, deadline: member.deadline }, me.id);
+    await this._scheduleAlarm();
   }
   async webSocketError(ws) { await this.webSocketClose(ws, 1011); }
   // 全Peer退出時だけRoomを終了し、作成制限の枠を返す。
@@ -338,7 +396,18 @@ export class Room {
     const st = this.ctx.storage, status = await st.get('status');
     if (status === 'closed') { await st.deleteAll(); return; }
     if (status === 'waiting') { await this._release(false); await st.deleteAll(); return; }
-    if (this.ctx.getWebSockets().length === 0) { await this._closeRoom(true); return; }
-    await st.setAlarm(Date.now() + ROOM_TTL_MS);
+    const members = (await st.get('members')) || {}, now = Date.now();
+    for (const member of Object.values(members)) {
+      if (member.deadline && member.deadline <= now) {
+        delete members[member.id];
+        if (member.authority && (await st.get('authorityId')) === member.id) {
+          await st.put({ authorityId: '', status: 'waiting-authority' });
+          this._broadcast({ t: 'authority-left', id: member.id });
+        } else this._broadcast({ t: 'peer-leave', id: member.id });
+      }
+    }
+    await st.put('members', members);
+    if (Object.keys(members).length === 0 && this.ctx.getWebSockets().length === 0) { await this._closeRoom(true); return; }
+    await this._scheduleAlarm();
   }
 }
