@@ -29,7 +29,6 @@ function newRoomCode() {
   return Array.from(b, (x) => ROOM_ALPHABET[x % ROOM_ALPHABET.length]).join('');
 }
 const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
-const sha256hex = async (text) => hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
 function originAllowed(request, env) {
   const origin = request.headers.get('Origin');
   const list = (env.ALLOWED_ORIGIN || '*').split(',').map((x) => x.trim()).filter(Boolean);

@@ -38,12 +38,11 @@ function makeCtx() {
   };
 }
 const req = (path, o = {}) => ({ url: 'https://room' + path, method: o.method || 'GET', headers: { get: (k) => (k.toLowerCase() === 'upgrade' ? 'websocket' : null) }, json: async () => o.body });
-const sha = async (t) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t))), (b) => b.toString(16).padStart(2, '0')).join('');
 
 async function newRoom(env = {}) {
   const ctx = makeCtx();
   const room = new Room(ctx, env);
-  const init = await room.fetch(req('/init', { method: 'POST', body: { serverId: 's1', code: 'ABC234', hostTokenHash: await sha('TOKEN'), ipHash: 'ip1' } }));
+  const init = await room.fetch(req('/init', { method: 'POST', body: { serverId: 's1', code: 'ABC234', ipHash: 'ip1' } }));
   assert.equal(init.status, 200);
   return { ctx, room };
 }

@@ -126,9 +126,10 @@ export class NetSession {
       this._status('ゲーム進行役が退出しました。Roomは維持されています');
     }
     else if (m.t === 'peer-leave' && this.isHost) {
-      // 接続が成立済みの相手は、DOのWebSocketが切れてもP2Pが生きていれば続ける(切れたかどうかはP2P側の状態で決める)
       const p = this.peers.get(String(m.id));
       if (p && !p.ready) this._peerLost(p);
+    } else if (m.t === 'peer-leave' && !this.isHost) {
+      this.players.delete(String(m.id)); this._emitPlayers();
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
     else if (m.t === 'closed') this._end('closed');
   }
