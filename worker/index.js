@@ -278,7 +278,7 @@ export class Room {
   }
   // Room作成者ではなく、最初に接続したPeerが暫定Simulation Authorityになる。
   async _acceptAuthority(url, st, status) {
-    if (status !== 'waiting' && status !== 'waiting-authority') return new Response('authority_exists', { status: 409 });
+    if (status !== 'waiting') return new Response('authority_exists', { status: 409 });
     if (await st.get('authorityId')) return new Response('authority_exists', { status: 409 });
     if (this.ctx.getWebSockets().length >= ROOM_MAX) return new Response('full', { status: 409 });
     const seq = ((await st.get('seq')) || 0) + 1, id = 'p' + seq, name = cleanName(url.searchParams.get('name'));

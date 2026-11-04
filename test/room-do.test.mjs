@@ -63,6 +63,7 @@ const connect = async (room, q) => { const r = await room.fetch(wsReq(q)); retur
   const join = await connect(room, 'name=Taro');
   assert.equal(join.status, 101);
   assert.equal(ctx.sockets[1].last('hello').authorityId, 'p1');
+  assert.deepEqual(ctx.sockets[1].last('hello').peers, [{ id: 'p1', name: 'Creator' }]);
   assert.equal(authority.last('peer-join').id, 'p2');
 }
 
@@ -90,6 +91,7 @@ const connect = async (room, q) => { const r = await room.fetch(wsReq(q)); retur
   assert.equal(info.players, 2);
   assert.equal(info.authorityAvailable, false);
   assert.equal((await connect(room, 'name=Late')).status, 409, 'Authority不在中は新規参加を保留');
+  assert.equal((await connect(room, 'authority=1&name=Replacement')).status, 409, 'Authorityの自動交代はまだ行わない');
 }
 
 // 4) 通常Peerの退出は残りのPeerへ通知し、最後の退出でRoomを終了する

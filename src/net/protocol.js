@@ -1,4 +1,4 @@
-// P2Pマルチプレイの通信仕様(Hybrid P2P / Host型Star)。THREE・ブラウザ非依存なのでNodeでテストできる。
+// P2Pマルチプレイの通信仕様(Hybrid P2P / Simulation Authority型Star)。THREE・ブラウザ非依存なのでNodeでテストできる。
 // - DataChannel 'ctl'(順序あり・信頼): hello / welcome / join / leave / ping / pong
 // - DataChannel 'st' (順序なし・再送なし): 's'(クライアント→ホスト)と 'S'(ホスト→全員)。
 //   順序が入れ替わるので、どちらにも連番 n を付け、受け取った側は「最後に採用したnより大きいもの」だけを使う
