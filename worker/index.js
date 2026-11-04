@@ -325,7 +325,7 @@ export class Room {
     ws.serializeAttachment(peer);
     members[peer.id] = { ...members[peer.id], authority: true, deadline: 0 };
     await st.put({ members, authorityId: peer.id, status: 'running' });
-    const roster = Object.values(members).filter((m) => m.id !== peer.id).map((m) => ({ id: m.id, name: m.name }));
+    const roster = this.ctx.getWebSockets().map((sock) => sock.deserializeAttachment()).filter((p) => p && !p.pendingResume && p.id !== peer.id).map((p) => ({ id: p.id, name: p.name }));
     ws.send(JSON.stringify({ t: 'authority-elected', id: peer.id, name: peer.name, previousId: oldId, previousName: oldName, peers: roster }));
     this._broadcast({ t: 'authority-changed', id: peer.id, name: peer.name, previousId: oldId, previousName: oldName, peers: roster }, peer.id);
     await this._scheduleAlarm();
