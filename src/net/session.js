@@ -59,7 +59,7 @@ export class NetSession {
     this.seq = 0;        // Authority: 送ったスナップショットの連番 / 通常Peer: 送った状態の連番
     this.lastSeq = -1;   // 通常Peer: 最後に採用したスナップショットの連番
     this.authorityAvailable = false;
-    this.resumeToken = ''; this.reconnectTimer = null; this.reconnectDeadline = 0; this.reconnecting = false;
+    this.resumeToken = ''; this.reconnectTimer = null; this.reconnectDeadline = 0; this.reconnecting = false; this.formerAuthority = false;
   }
 
   connect() {
@@ -92,7 +92,7 @@ export class NetSession {
   // ── DO(シグナリング)とのWebSocket ──
   _openWs() {
     const url = wsUrl(this.code, cleanName(this.o.name), this.o.asAuthority);
-    const ws = new WebSocket(url + (this.resumeToken ? '&resume=1' : ''));
+    const ws = new WebSocket(url + (this.formerAuthority ? '&former=1' : '') + (this.resumeToken ? '&resume=1' : ''));
     this.ws = ws;
     ws.onopen = () => { if (this.ws === ws && this.resumeToken && this.reconnecting) ws.send(JSON.stringify({ t: 'resume', token: this.resumeToken })); };
     ws.onmessage = (e) => { if (this.ws === ws) this._onWs(e.data); };
@@ -127,7 +127,7 @@ export class NetSession {
     if (m.t === 'resume-error') {
       // Authorityは切断時点で権限を失っている。resumeせず、新しい通常Peerとして参加し直す。
       if (this.reconnecting && !this.closed) {
-        this.resumeToken = ''; this.reconnecting = false; this.o.asAuthority = false;
+        this.resumeToken = ''; this.reconnecting = false; this.o.asAuthority = false; this.formerAuthority = true;
         clearTimeout(this.reconnectTimer); this._status('通常プレイヤーとして再参加中…');
         this._openWs();
       } else this._end('signal-lost');
@@ -161,7 +161,7 @@ export class NetSession {
     }
     if (m.t === 'hello') {
       if (typeof m.resumeToken === 'string') this.resumeToken = m.resumeToken;
-      this.reconnecting = false; clearTimeout(this.reconnectTimer);
+      this.reconnecting = false; this.formerAuthority = false; clearTimeout(this.reconnectTimer);
       this.id = String(m.id); this.authorityId = String(m.authorityId || m.hostId || ''); this.isAuthority = !!(m.authority || m.host); this.authorityAvailable = !!this.authorityId;
       if (this.isAuthority) {
         this.players = new Map((Array.isArray(m.peers) ? m.peers : []).filter((p) => p && typeof p.id === 'string').map((p) => [p.id, { id: p.id, name: cleanName(p.name) }]));
