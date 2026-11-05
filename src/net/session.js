@@ -17,7 +17,7 @@ const base = () => CONFIG.apiBase.replace(/\/+$/, '');
 const P2P_TIMEOUT_MS = 15000;
 const WS_RECONNECT_MS = 40000;     // Room側の猶予(45秒)より短くする
 const READY_FALLBACK_MS = 3000;    // 時計の最初の返事がこなくても、これだけ待てば参加済みにする
-const CLOCK_BURST = 6;             // 参加時に時計を合わせる往復の回数
+const CLOCK_BURST = 4;             // 参加時に時計を合わせる往復の回数
 const CLOCK_BURST_GAP_MS = 150;
 const CLOCK_RESYNC_MS = 600000;    // その後は10分ごとに1回だけ合わせ直す(端末ごとの時計の進み方の違い。DOを起こす回数を減らすため間引く)
 const CLOCK_RESYNC_BURST = 1;
