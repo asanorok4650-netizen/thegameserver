@@ -1,72 +1,68 @@
-// 世界時刻の同期(ClockSync)のテスト
+// 世界時刻の同期(ServerClock)のテスト
 import assert from 'node:assert/strict';
-import { ClockSync } from '../src/net/clock.js';
+import { ServerClock } from '../src/net/clock.js';
 
 let nowMs = 100000;
-const mk = (o) => new ClockSync({ now: () => nowMs, ...o });
+const mk = (o) => new ServerClock({ now: () => nowMs, ...o });
+const roomAt = (ms) => 5000 + (ms - 100000) / 1000; // Roomの世界時刻(秒)。自分の時計と同じ速さで進む
+
+// 試す関数: 片道 up ミリ秒で届き、返事は down ミリ秒で戻る。返事を受け取った時点で sample を呼ぶ
+function ping(c, up, down) {
+  const sentAt = nowMs;
+  const s = roomAt(sentAt + up); // Roomが返事を作った時刻の世界時刻
+  nowMs += up + down;
+  c.sample(sentAt, s);
+}
 
 // まだサンプルがなければ null
 { const c = mk(); assert.equal(c.time(), null); assert.equal(c.has(), false); }
 
-// 遅延なしなら、ホスト時刻にそのまま合う。時間が進めば同じだけ進む
+// 行きと帰りが同じ遅れなら、ほぼ正確に合う。時間が進めば同じだけ進む
 {
   const c = mk();
-  const hostAt = (ms) => 5000 + (ms - 100000) / 1000; // ホストの時計(秒)
-  c.sample(hostAt(nowMs));
-  assert.ok(Math.abs(c.time() - hostAt(nowMs)) < 1e-9);
+  ping(c, 30, 30);
+  assert.ok(Math.abs(c.time() - roomAt(nowMs)) < 1e-9);
   nowMs += 3000;
-  assert.ok(Math.abs(c.time() - hostAt(nowMs)) < 1e-9);
+  assert.ok(Math.abs(c.time() - roomAt(nowMs)) < 1e-9);
 }
 
-// 揺れ: 遅延が 20〜200ms で変わっても、最小遅延のサンプルに寄る(遅いパケットで時計が戻らない)
+// 揺れ: 往復が 40〜400ms で変わっても、最小往復(40ms)のサンプルに寄る
 {
   nowMs = 100000;
   const c = mk();
-  const hostAt = (ms) => 50 + (ms - 100000) / 1000;
-  const delays = [200, 40, 120, 20, 180, 90, 20, 150, 60, 30, 170, 20, 110, 80, 20, 140, 50, 100, 20, 160]; // 2秒ぶん(10Hz)
-  for (const d of delays) {
-    nowMs += 100;
-    c.sample(hostAt(nowMs - d)); // dミリ秒前にホストが送ったパケットが今届いた
-  }
-  const err = c.time() - hostAt(nowMs);
-  assert.ok(err < 0 && err > -0.03, 'ずれは最小遅延(20ms)程度: ' + err);
+  for (const d of [200, 40, 120, 20, 180, 90]) { ping(c, d, d); nowMs += 100; }
+  assert.ok(Math.abs(c.time() - roomAt(nowMs)) < 1e-9, '対称な往復なら最小往復のサンプルで正確');
+  const before = c.time() - roomAt(nowMs);
+  ping(c, 400, 400); // 遅い往復が来ても時計は乱れない
+  assert.ok(Math.abs(c.time() - roomAt(nowMs) - before) < 1e-9);
 }
 
-// 往復時間の半分を足す: 片道20msのとき、rtt=40msを渡せばほぼ正しい時刻になる
+// 行きと帰りが非対称でも、誤差は往復の差の半分まで
 {
   nowMs = 100000;
   const c = mk();
-  c.setRtt(40);
-  const hostAt = (ms) => 10 + (ms - 100000) / 1000;
-  for (let i = 0; i < 10; i++) { nowMs += 100; c.sample(hostAt(nowMs - 20)); }
-  assert.ok(Math.abs(c.time() - hostAt(nowMs)) < 0.002);
+  ping(c, 10, 50); // 片道が違う(往復60ms)
+  assert.ok(Math.abs(c.time() - roomAt(nowMs)) <= 0.021, '誤差は (50-10)/2 = 20ms 以内');
 }
 
 // 大きなずれは一度で合わせ、小さなずれはなだらかに寄せる
 {
   nowMs = 100000;
-  const c = mk();
-  c.sample(10);
+  const c = mk({ keep: 1 });
+  ping(c, 10, 10);
   const t0 = c.time();
-  c.sample(10 + 0.05 + (nowMs - 100000) / 1000); // 50msだけ進んでいた
-  assert.ok(c.time() > t0 && c.time() < t0 + 0.05, 'なだらかに寄る');
-  c.sample(500 + (nowMs - 100000) / 1000);       // 490秒ずれ(ホストを開き直したなど)
-  assert.ok(Math.abs(c.time() - 500) < 1e-6, '大きなずれは一度で合わせる');
+  const sentAt = nowMs; nowMs += 20;
+  c.sample(sentAt, roomAt(sentAt + 10) + 0.05); // Roomの時計が50ms進んでいた
+  assert.ok(c.time() > t0 && c.time() < t0 + 0.05 + 0.03, 'なだらかに寄る');
+  const s2 = nowMs; nowMs += 20;
+  c.sample(s2, roomAt(s2 + 10) + 490); // 490秒ずれ
+  assert.ok(Math.abs(c.time() - (roomAt(nowMs) + 490)) < 1e-6, '大きなずれは一度で合わせる');
 }
 
-// 不正な値は無視
-{
-  const c = mk(); c.sample(NaN); c.sample(Infinity); c.setRtt(-1); c.setRtt(NaN);
-  assert.equal(c.time(), null); assert.equal(c.rttMs, 0);
-}
-
-// 古いサンプルは窓から外れる(ホストの時計が遅い側へ変わったら追従する)
+// 不正な値は無視(負の往復=時計が戻った、も含む)
 {
   nowMs = 100000;
-  const c = mk({ windowMs: 1000, snapMs: 1e9, gain: 1 });
-  c.sample(100);                  // offset = 100 - 100 = 0
-  nowMs += 2000;
-  c.sample(100.5);                // 窓外の古いサンプルは捨てられ、これだけで決まる
-  assert.ok(Math.abs(c.time() - 100.5) < 1e-9);
+  const c = mk(); c.sample(NaN, 1); c.sample(1, Infinity); c.sample(nowMs + 1000, 1);
+  assert.equal(c.time(), null);
 }
 console.log('net-clock: ok');
