@@ -21,6 +21,7 @@ const CLOCK_BURST = 4;             // 参加時に時計を合わせる往復の
 const CLOCK_BURST_GAP_MS = 150;
 const CLOCK_RESYNC_MS = 600000;    // その後は10分ごとに1回だけ合わせ直す(端末ごとの時計の進み方の違い。DOを起こす回数を減らすため間引く)
 const CLOCK_RESYNC_BURST = 1;
+const PEER_CLOCK_SYNC_MS = 60000; // Roomを起こさず、ctlで1分ごとに時計を照合
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]; // 切れたP2Pを張り直す間隔(全部で約30秒。それでもだめなら諦める)
 const RETRY_GUARD_MS = 3000;       // 作ったばかりの接続は、再試行の依頼で作り直さない
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,7 +67,7 @@ export class NetSession {
     this.known = new Map();  // Roomが知っている、自分以外の参加者 id → name
     this.peers = new Map();  // WebRTCの相手 id → peer
     this.clock = new ServerClock();
-    this.timer = null; this.clockTimer = null; this.readyTimer = null;
+    this.timer = null; this.clockTimer = null; this.peerClockTimer = null; this.readyTimer = null;
     this.seq = 0;
     this.lastBody = null; this.lastSentAt = 0;
     this.resumeWait = null; this.reconnecting = false;
@@ -168,7 +169,14 @@ export class NetSession {
       this._ensureLink(id);
       this._scheduleRetry(id);
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
-    else if (m.t === 'time') { if (Number.isFinite(m.c) && Number.isFinite(m.s)) { this.clock.sample(m.c, m.s); this._becomeReady(); } }
+    else if (m.t === 'time') {
+      if (Number.isFinite(m.c) && Number.isFinite(m.s)) {
+        const firstSample = !this.clock.has();
+        this.clock.sample(m.c, m.s);
+        if (firstSample) this._syncPeerClocks();
+        this._becomeReady();
+      }
+    }
     else if (m.t === 'closed') this._end('closed');
   }
 
@@ -189,6 +197,18 @@ export class NetSession {
     this._burstClock(CLOCK_BURST);
     clearInterval(this.clockTimer);
     this.clockTimer = setInterval(() => this._burstClock(CLOCK_RESYNC_BURST), CLOCK_RESYNC_MS);
+    clearInterval(this.peerClockTimer);
+    this.peerClockTimer = setInterval(() => this._syncPeerClocks(), PEER_CLOCK_SYNC_MS);
+  }
+
+  // ctlでPeerへ問い合わせる。応答側はRoom由来の推定だけを返すため、Peer間で誤差が連鎖しない。
+  _pingPeerClock(peer) {
+    if (peer?.ready && this.clock.has()) this._sendCtl(peer, { t: 'clock-ping', c: performance.now() });
+  }
+
+  _syncPeerClocks() {
+    if (!this.clock.has()) return;
+    for (const peer of this.peers.values()) this._pingPeerClock(peer);
   }
 
   _becomeReady() {
@@ -283,6 +303,7 @@ export class NetSession {
     this._clearRetry(peer.id);
     peer.ready = true;
     peer.lastSeen = performance.now();
+    this._pingPeerClock(peer);
     this._emitPlayers();
   }
 
@@ -293,6 +314,13 @@ export class NetSession {
     if (now - peer.ctlWindow > 1000) { peer.ctlWindow = now; peer.ctlCount = 0; }
     if (++peer.ctlCount > CTL_MAX_PER_SEC) return; // 制御メッセージの送りすぎは捨てる
     if (m.t === 'bye') this._peerLost(peer, false, true);       // 相手が自分から抜けた(切断の検出を待たずに済む)
+    else if (m.t === 'clock-ping') {
+      if (Number.isFinite(m.c) && this.clock.has()) {
+        this._sendCtl(peer, { t: 'clock-pong', c: m.c, s: this.clock.roomTime(), u: this.clock.roomUncertainty() });
+      }
+    } else if (m.t === 'clock-pong') {
+      if (Number.isFinite(m.c) && Number.isFinite(m.s) && Number.isFinite(m.u)) this.clock.samplePeer(m.c, m.s, m.u);
+    }
   }
 
   _onSt(peer, data) {
@@ -385,7 +413,7 @@ export class NetSession {
   _end(reason, silent = false) {
     if (this.closed) return;
     this.closed = true;
-    clearInterval(this.timer); clearInterval(this.clockTimer); clearTimeout(this.readyTimer);
+    clearInterval(this.timer); clearInterval(this.clockTimer); clearInterval(this.peerClockTimer); clearTimeout(this.readyTimer);
     for (const r of this.retries.values()) clearTimeout(r.timer);
     this.retries.clear();
     const peers = [...this.peers.values()];
