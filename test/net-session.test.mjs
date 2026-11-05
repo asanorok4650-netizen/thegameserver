@@ -165,6 +165,13 @@ await until(() => [a, b, c].every((x) => x.s.getNetTime() !== null), '時計');
   const ts = [a, b, c].map((x) => x.s.getNetTime());
   assert.ok(Math.max(...ts) - Math.min(...ts) < 0.05, '時計のずれ: ' + ts.join(','));
 }
+await until(() => [a, b, c].every((x) => x.s.clock.peerAt > 0), 'ctl経由のPeer時計同期');
+{
+  const requests = [a, b, c].map((x) => x.s.ws.timeSent);
+  await sleep(100);
+  assert.deepEqual([a, b, c].map((x) => x.s.ws.timeSent), requests, 'Peer時計同期でRoomへの問い合わせは増えない');
+  assert.ok([a, b, c].every((x) => x.s.clock.roomTime() !== null), 'Peerへ共有するRoom基準時刻を保持');
+}
 
 // 4) 止まっている間は送る回数を間引く(動いているときは毎回送る)
 {
