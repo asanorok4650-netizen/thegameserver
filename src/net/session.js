@@ -95,6 +95,16 @@ export class NetSession {
   _signal(to, data) { if (this.ws?.readyState === 1) this.ws.send(JSON.stringify({ t: 'signal', to, data })); }
   _sendCtl(peer, msg) { if (peer?.ctl.readyState === 'open') peer.ctl.send(encode(msg)); }
 
+  // ICE候補は最大5件、または50msごとにまとめてRoomへ送る。
+  _flushIceCandidates(peer) {
+    if (!peer || peer.gone || !peer.iceQueue?.length) return;
+    clearTimeout(peer.iceFlushTimer);
+    peer.iceFlushTimer = null;
+    const candidates = peer.iceQueue.splice(0, 5);
+    this._signal(peer.id, { cs: candidates });
+    if (peer.iceQueue.length) peer.iceFlushTimer = setTimeout(() => this._flushIceCandidates(peer), 50);
+  }
+
   // ── Room(シグナリング)とのWebSocket ──
   _openWs(resume) {
     const ws = new WebSocket(wsUrl(this.code, cleanName(this.o.name), resume));
@@ -199,8 +209,14 @@ export class NetSession {
     const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 });
     st.binaryType = 'arraybuffer';
     const now = performance.now();
-    const peer = { id, name, pc, ctl, st, pending: [], remoteSet: false, ready: false, gone: false, state: null, lastRx: 0, rxSeq: -1, lastSeen: now, ctlWindow: now, ctlCount: 0, timer: null, created: now };
-    pc.onicecandidate = (e) => { if (e.candidate) this._signal(id, { c: e.candidate.toJSON() }); };
+    const peer = { id, name, pc, ctl, st, pending: [], iceQueue: [], iceFlushTimer: null, remoteSet: false, ready: false, gone: false, state: null, lastRx: 0, rxSeq: -1, lastSeen: now, ctlWindow: now, ctlCount: 0, timer: null, created: now };
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        peer.iceQueue.push(e.candidate.toJSON());
+        if (peer.iceQueue.length >= 5) this._flushIceCandidates(peer);
+        else if (!peer.iceFlushTimer) peer.iceFlushTimer = setTimeout(() => this._flushIceCandidates(peer), 50);
+      } else this._flushIceCandidates(peer); // ICE gathering完了時に残りを送る
+    };
     pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this._peerLost(peer, true); };
     ctl.onopen = () => this._onCtlOpen(peer);
     ctl.onclose = () => this._peerLost(peer);
@@ -249,7 +265,13 @@ export class NetSession {
         if (peer && performance.now() - peer.created < RETRY_GUARD_MS) return; // 張り直している最中
         if (peer) this._peerLost(peer, false, true);
         this._offerTo(from, this.known.get(from));
-      } else if (data.c && peer) {
+      } else if (Array.isArray(data.cs) && peer) {
+        for (const candidate of data.cs.slice(0, 5)) {
+          if (!candidate || typeof candidate !== 'object') continue;
+          if (peer.remoteSet) await peer.pc.addIceCandidate(candidate).catch(() => {});
+          else if (peer.pending.length < 64) peer.pending.push(candidate);
+        }
+      } else if (data.c && peer) { // 古いクライアントからの単独候補も受け付ける
         if (peer.remoteSet) await peer.pc.addIceCandidate(data.c).catch(() => {});
         else if (peer.pending.length < 64) peer.pending.push(data.c);
       }
@@ -309,6 +331,8 @@ export class NetSession {
     if (!peer || peer.gone) return;
     peer.gone = true;
     clearTimeout(peer.timer);
+    clearTimeout(peer.iceFlushTimer);
+    peer.iceQueue.length = 0;
     const wasReady = peer.ready;
     this.peers.delete(peer.id);
     try { peer.pc.close(); } catch (e) { /* 無視 */ }
@@ -368,7 +392,7 @@ export class NetSession {
     // 自分から抜けるとき: 相手に知らせる(切断の検出を待たせない)
     if (reason === 'left') for (const p of peers) this._sendCtl(p, { t: 'bye' });
     this.peers.clear();
-    const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); try { p.pc.close(); } catch (e) { /* 無視 */ } } };
+    const closePeers = () => { for (const p of peers) { clearTimeout(p.timer); clearTimeout(p.iceFlushTimer); p.iceQueue.length = 0; try { p.pc.close(); } catch (e) { /* 無視 */ } } };
     if (reason === 'left') setTimeout(closePeers, 250); // 送った'bye'が届く前にチャネルを閉じない
     else closePeers();
     if (this.resumeWait) { const r = this.resumeWait; this.resumeWait = null; r(false); }
