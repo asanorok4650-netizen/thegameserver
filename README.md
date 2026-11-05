@@ -197,11 +197,13 @@ worker/
 test/           Node.jsテスト
 docs/
   DEVELOPMENT.md 開発者向け詳細仕様
+  MULTIPLAYER-SERVER-BROWSER.md サーバー一覧・参加割当の設計（未実装）
 ```
 
 ## 関連ドキュメント
 
 - [開発者向けガイド](docs/DEVELOPMENT.md) — ワールド形式、ゲームエンジン、Studio、スクリプト、ネットワーク仕様
+- [マルチプレイサーバー一覧・参加導線の設計](docs/MULTIPLAYER-SERVER-BROWSER.md) — GameLobby DO、Room予約ticket、作成制限を維持した参加処理（**設計のみ・未実装**）
 - [Cloudflare Worker設定](worker/wrangler.toml)
 - [パッケージ定義・テストコマンド](package.json)
 
