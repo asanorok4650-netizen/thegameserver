@@ -311,7 +311,7 @@ Worker の環境設定は `worker/wrangler.toml` を参照してください。�
   - `onSnapshot` は、いま見えている他のプレイヤー全員の最新の位置を、送信と同じ間隔で渡す(載っていない人は消えた人)。
   - 一部の相手とだけ直接つながらなくても、他の相手とは続ける(ステータスに出る)。終了するのは、参加前にシグナリングが切れたときと、Roomが閉じられたときだけ。
   - シグナリングのWebSocketが切れても、P2Pは続く。裏で再接続する(`hello` で渡された `token` を使う)。
-- `src/net/clock.js`: `ServerClock`。世界時刻 = 「Room(DO)を作ってからの経過秒」。参加時に数回、その後は2分ごとに3回、Roomへ時刻を問い合わせ、往復時間が最小のサンプルから自分の時計とのずれを出す。`Game.worldTime()` は参加中これを使う(動く床の `spinner` / `mover` は時刻の関数なので、全員で同じ位置になる)。
+- `src/net/clock.js`: `ServerClock`。世界時刻 = 「Room(DO)を作ってからの経過秒」。参加時に数回、その後は10分ごとに1回、Roomへ時刻を問い合わせ、往復時間が最小のサンプルから自分の時計とのずれを出す。`Game.worldTime()` は参加中これを使う(動く床の `spinner` / `mover` は時刻の関数なので、全員で同じ位置になる)。
 - `worker/index.js` の `Room`(Durable Object, SQLite-backed): 参加者の名簿、SDP/ICEの中継(参加者どうし)、世界時刻の基準だけ。ゲームのデータは通さない。
 - `worker/room-limit.js` + D1 `room_limits`: ルーム作成の制限。
 
