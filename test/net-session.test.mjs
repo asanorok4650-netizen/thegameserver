@@ -21,6 +21,7 @@ class SrvWs { // Room側のWebSocket
 globalThis.WebSocketPair = class { constructor() { this[0] = {}; this[1] = new SrvWs(); } };
 const { Room } = await import('../worker/index.js');
 const sockets = []; const store = new Map();
+globalThis.signalMessages = [];
 const ctx = {
   storage: {
     async get(k) { return store.get(k); },
@@ -46,7 +47,7 @@ class FakeWebSocket { // クライアント側
       for (const m of srv.pending.splice(0)) queueMicrotask(() => this.onmessage?.({ data: m }));
     });
   }
-  send(m) { room.webSocketMessage(this.srv, m); }
+  send(m) { const parsed = JSON.parse(m); if (parsed.t === 'signal') globalThis.signalMessages.push(parsed); room.webSocketMessage(this.srv, m); }
   close() { if (this.readyState === 3) return; this.readyState = 3; room.webSocketClose(this.srv, 1000); }
 }
 globalThis.WebSocket = FakeWebSocket;
@@ -63,7 +64,7 @@ class FakeDC {
   }
 }
 class FakePC {
-  constructor() { this.id = 'pc' + (++pcSeq); this.dcs = {}; this.connectionState = 'new'; this.localDescription = null; pcs.set(this.id, this); }
+  constructor() { this.id = 'pc' + (++pcSeq); this.dcs = {}; this.connectionState = 'new'; this.localDescription = null; this.addedCandidates = []; pcs.set(this.id, this); }
   createDataChannel(label) { return (this.dcs[label] = new FakeDC(label)); }
   async createOffer() { return { type: 'offer', sdp: 'fake:' + this.id }; }
   async createAnswer() { return { type: 'answer', sdp: 'fake:' + this.id }; }
@@ -78,7 +79,7 @@ class FakePC {
       }
     }
   }
-  async addIceCandidate() {}
+  async addIceCandidate(candidate) { this.addedCandidates.push(candidate); }
   close() {
     this.connectionState = 'closed';
     for (const dc of Object.values(this.dcs)) {
@@ -122,6 +123,30 @@ await until(() => [a, b, c].every((x) => x.log.players.length === 3), '3人の�
 assert.deepEqual([a.s.id, b.s.id, c.s.id], ['p1', 'p2', 'p3']);
 assert.deepEqual(a.log.players.map((p) => p.name).sort(), ['A', 'B', 'C']);
 assert.ok([a, b, c].every((x) => x.s.peers.size === 2), '全員が全員と1本ずつつながる(二重の接続がない)');
+
+// ICE候補は5件で即時バッチ化し、少数の残りは50ms以内にまとめる。
+{
+  const ab = a.s.peers.get('p2'), ba = b.s.peers.get('p1');
+  let before = signalMessages.length;
+  for (let i = 0; i < 5; i++) ab.pc.onicecandidate({ candidate: { toJSON: () => ({ candidate: 'candidate:' + i }) } });
+  await until(() => signalMessages.length === before + 1, 'ICE 5件の即時バッチ');
+  assert.equal(signalMessages.at(-1).data.cs.length, 5);
+  assert.deepEqual(signalMessages.at(-1).data.cs.map((x) => x.candidate), ['candidate:0', 'candidate:1', 'candidate:2', 'candidate:3', 'candidate:4']);
+  await until(() => ba.pc.addedCandidates.length === 5, 'ICEバッチの受信');
+
+  before = signalMessages.length;
+  for (let i = 5; i < 7; i++) ab.pc.onicecandidate({ candidate: { toJSON: () => ({ candidate: 'candidate:' + i }) } });
+  await until(() => signalMessages.length === before + 1, 'ICE少数候補のタイマー送信', 1000);
+  assert.equal(signalMessages.at(-1).data.cs.length, 2);
+  await until(() => ba.pc.addedCandidates.length === 7, 'ICE少数候補の受信');
+
+  before = signalMessages.length;
+  ab.pc.onicecandidate({ candidate: { toJSON: () => ({ candidate: 'candidate:7' }) } });
+  ab.pc.onicecandidate({ candidate: null });
+  await until(() => signalMessages.length === before + 1, 'ICE gathering完了時のflush');
+  assert.equal(signalMessages.at(-1).data.cs.length, 1);
+  await until(() => ba.pc.addedCandidates.length === 8, 'ICE完了候補の受信');
+}
 
 // 2) 位置がバイナリで届く(量子化の誤差内)。自分は含まれない
 await until(() => [a, b, c].every((x) => x.log.snap.length === 2), '全員の位置');
