@@ -3,6 +3,8 @@
 // - 接続の向き: 後から入った人は待つだけ。先にいた人が「新しい人」へofferを出す(両側が同時に出すことがない)。
 // - 位置は各自が計算して、16バイトのバイナリ(protocol.encodeState)で全員へ送る。受け取った側が補間して表示する。
 // - シグナリングのWebSocketが切れても、つながっている相手とのP2Pは続く。裏で再接続して(Roomが猶予を持つ)、新しい参加者も迎える。
+// - P2Pが切れた相手とは、続けて張り直す(間隔を広げて数回)。offerを出すのは常に先に入った側なので、後から入った側は
+//   シグナリングで「もう一度offerを出して」と頼む({retry:true})。再接続した人はRoomが peer-back で全員に知らせる。
 // - ゲームの内容(スクリプトの結果・HP・スコア)は同期しない。ホストがいないので、いまは位置と向きだけ。
 import { CONFIG } from '../config.js';
 import {
@@ -19,6 +21,8 @@ const CLOCK_BURST = 6;             // 参加時に時計を合わせる往復の
 const CLOCK_BURST_GAP_MS = 150;
 const CLOCK_RESYNC_MS = 600000;    // その後は10分ごとに1回だけ合わせ直す(端末ごとの時計の進み方の違い。DOを起こす回数を減らすため間引く)
 const CLOCK_RESYNC_BURST = 1;
+const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000]; // 切れたP2Pを張り直す間隔(全部で約30秒。それでもだめなら諦める)
+const RETRY_GUARD_MS = 3000;       // 作ったばかりの接続は、再試行の依頼で作り直さない
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function roomRequest(path, options) {
@@ -65,7 +69,8 @@ export class NetSession {
     this.timer = null; this.clockTimer = null; this.readyTimer = null;
     this.seq = 0;
     this.lastBody = null; this.lastSentAt = 0;
-    this.resumeWait = null; this.reconnecting = false; this.failedNotified = false;
+    this.resumeWait = null; this.reconnecting = false;
+    this.retries = new Map(); // 切れた相手 id → { n:試した回数, timer }
   }
 
   connect() {
@@ -141,8 +146,17 @@ export class NetSession {
     } else if (m.t === 'peer-leave') {
       const id = String(m.id);
       this.known.delete(id);
+      this._clearRetry(id);
       const p = this.peers.get(id);
-      if (p && !p.ready) this._peerLost(p); // 接続が成立済みの相手は、P2Pが生きていれば続ける
+      if (p && !p.ready) this._peerLost(p, false, true); // 接続が成立済みの相手は、P2Pが生きていれば続ける
+    } else if (m.t === 'peer-back') {
+      // 相手のシグナリングだけが切れていて、戻ってきた。P2Pが切れていれば張り直す
+      const id = String(m.id);
+      if (id === this.id || !/^p\d{1,9}$/.test(id)) return;
+      this.known.set(id, cleanName(m.name));
+      this._clearRetry(id);
+      this._ensureLink(id);
+      this._scheduleRetry(id);
     } else if (m.t === 'signal') this._onSignal(String(m.from), m.data);
     else if (m.t === 'time') { if (Number.isFinite(m.c) && Number.isFinite(m.s)) { this.clock.sample(m.c, m.s); this._becomeReady(); } }
     else if (m.t === 'closed') this._end('closed');
@@ -153,8 +167,8 @@ export class NetSession {
     const list = validPlayers(m.peers) || [];
     const ids = new Set(list.map((p) => p.id));
     this.known = new Map(list.map((p) => [p.id, p.name]));
-    for (const p of list) if (!this.peers.has(p.id)) this._offerTo(p.id, p.name);
-    for (const peer of [...this.peers.values()]) if (!peer.ready && !ids.has(peer.id)) this._peerLost(peer);
+    for (const peer of [...this.peers.values()]) if (!ids.has(peer.id)) this._peerLost(peer, false, true); // Roomにいない相手は片付ける
+    for (const p of list) { this._clearRetry(p.id); this._ensureLink(p.id); this._scheduleRetry(p.id); } // 留守の間に入った人・切れていた人とつなぐ
     const r = this.resumeWait; this.resumeWait = null; r?.(true);
   }
 
@@ -185,7 +199,7 @@ export class NetSession {
     const st = pc.createDataChannel('st', { negotiated: true, id: 1, ordered: false, maxRetransmits: 0 });
     st.binaryType = 'arraybuffer';
     const now = performance.now();
-    const peer = { id, name, pc, ctl, st, pending: [], remoteSet: false, ready: false, gone: false, state: null, lastRx: 0, rxSeq: -1, lastSeen: now, ctlWindow: now, ctlCount: 0, timer: null };
+    const peer = { id, name, pc, ctl, st, pending: [], remoteSet: false, ready: false, gone: false, state: null, lastRx: 0, rxSeq: -1, lastSeen: now, ctlWindow: now, ctlCount: 0, timer: null, created: now };
     pc.onicecandidate = (e) => { if (e.candidate) this._signal(id, { c: e.candidate.toJSON() }); };
     pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this._peerLost(peer, true); };
     ctl.onopen = () => this._onCtlOpen(peer);
@@ -214,11 +228,13 @@ export class NetSession {
     let peer = this.peers.get(from);
     try {
       if (data.sdp && (data.sdp.type === 'offer' || data.sdp.type === 'answer') && typeof data.sdp.sdp === 'string') {
-        if (!peer) {
-          // offerを受けるのは、自分より先に入っていて、Roomが参加者として教えてくれた相手だけ
-          if (data.sdp.type !== 'offer' || !this.known.has(from) || !(joinOrder(from) < joinOrder(this.id)) || this.peers.size >= MAX_PLAYERS - 1) return;
-          peer = this._makePeer(from, this.known.get(from));
-        }
+        if (data.sdp.type === 'offer') {
+          // offerを受けるのは、自分より先に入っていて、Roomが参加者として教えてくれた(または接続済みの)相手だけ
+          if ((!this.known.has(from) && !peer) || !(joinOrder(from) < joinOrder(this.id))) return;
+          if (peer) { this._peerLost(peer, false, true); peer = null; } // 切れたことに気づく前に、相手が張り直しに来た
+          if (this.peers.size >= MAX_PLAYERS - 1) return;
+          peer = this._makePeer(from, this.known.get(from) || 'Player');
+        } else if (!peer) return;
         await peer.pc.setRemoteDescription({ type: data.sdp.type, sdp: data.sdp.sdp });
         peer.remoteSet = true;
         for (const c of peer.pending.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
@@ -227,6 +243,12 @@ export class NetSession {
           const d = peer.pc.localDescription;
           this._signal(from, { sdp: { type: d.type, sdp: d.sdp } });
         }
+      } else if (data.retry === true) {
+        // 後から入った相手から「もう一度offerを出して」と頼まれた
+        if (!this.known.has(from) || !(joinOrder(from) > joinOrder(this.id))) return;
+        if (peer && performance.now() - peer.created < RETRY_GUARD_MS) return; // 張り直している最中
+        if (peer) this._peerLost(peer, false, true);
+        this._offerTo(from, this.known.get(from));
       } else if (data.c && peer) {
         if (peer.remoteSet) await peer.pc.addIceCandidate(data.c).catch(() => {});
         else if (peer.pending.length < 64) peer.pending.push(data.c);
@@ -236,6 +258,7 @@ export class NetSession {
 
   _onCtlOpen(peer) {
     clearTimeout(peer.timer);
+    this._clearRetry(peer.id);
     peer.ready = true;
     peer.lastSeen = performance.now();
     this._emitPlayers();
@@ -247,7 +270,7 @@ export class NetSession {
     peer.lastSeen = now;
     if (now - peer.ctlWindow > 1000) { peer.ctlWindow = now; peer.ctlCount = 0; }
     if (++peer.ctlCount > CTL_MAX_PER_SEC) return; // 制御メッセージの送りすぎは捨てる
-    if (m.t === 'bye') this._peerLost(peer);       // 相手が自分から抜けた(切断の検出を待たずに済む)
+    if (m.t === 'bye') this._peerLost(peer, false, true);       // 相手が自分から抜けた(切断の検出を待たずに済む)
   }
 
   _onSt(peer, data) {
@@ -281,7 +304,8 @@ export class NetSession {
     this.o.onSnapshot?.(list);
   }
 
-  _peerLost(peer, failed = false) {
+  // final: 相手が自分から抜けた・Roomからいなくなった・こちらから作り直す、など。張り直しはしない
+  _peerLost(peer, failed = false, final = false) {
     if (!peer || peer.gone) return;
     peer.gone = true;
     clearTimeout(peer.timer);
@@ -289,17 +313,57 @@ export class NetSession {
     this.peers.delete(peer.id);
     try { peer.pc.close(); } catch (e) { /* 無視 */ }
     if (wasReady) this._emitPlayers();
-    else if (failed && !this.closed && !this.failedNotified) {
-      // 一部の相手とだけ直接つながらなかった(回線の都合)。他の相手とは続けられる
-      this.failedNotified = true;
-      this._status('直接つながらなかった相手がいます(回線の都合の可能性があります)');
+    if (!final && !this.closed) this._scheduleRetry(peer.id);
+  }
+
+  // ── 切れたP2Pの張り直し ──
+  // 相手とのP2Pを用意する。offerを出すのは先に入った側。後から入った側は、先に入った側へ出し直しを頼む
+  _ensureLink(id) {
+    if (this.closed || !this.known.has(id)) return;
+    const p = this.peers.get(id);
+    if (p) {
+      if (p.ready || performance.now() - p.created < P2P_TIMEOUT_MS) return; // つながっている/つなぎ中
+      this._peerLost(p, false, true);
     }
+    if (joinOrder(id) > joinOrder(this.id)) this._offerTo(id, this.known.get(id));
+    else this._signal(id, { retry: true });
+  }
+
+  _clearRetry(id) {
+    const r = this.retries.get(id);
+    if (r) { clearTimeout(r.timer); this.retries.delete(id); }
+  }
+
+  _scheduleRetry(id) {
+    if (this.closed || !this.known.has(id) || this.peers.get(id)?.ready) return;
+    let r = this.retries.get(id);
+    if (!r) { r = { n: 0, timer: null }; this.retries.set(id, r); }
+    if (r.timer) return;
+    if (r.n >= RETRY_DELAYS_MS.length) {
+      // 回線の都合などで直接つながらない。他の相手とは続けられる
+      this.retries.delete(id);
+      this._status('直接つながらなかった相手がいます(回線の都合の可能性があります)');
+      return;
+    }
+    r.timer = setTimeout(() => { r.timer = null; this._retryNow(id); }, RETRY_DELAYS_MS[r.n]);
+  }
+
+  _retryNow(id) {
+    const r = this.retries.get(id);
+    if (!r || this.closed) return;
+    if (!this.known.has(id) || this.peers.get(id)?.ready) { this.retries.delete(id); return; }
+    if (this.ws?.readyState !== 1) { r.timer = setTimeout(() => { r.timer = null; this._retryNow(id); }, 1000); return; } // シグナリングが戻るまで待つ(回数に数えない)
+    r.n++;
+    this._ensureLink(id);
+    this._scheduleRetry(id);
   }
 
   _end(reason, silent = false) {
     if (this.closed) return;
     this.closed = true;
     clearInterval(this.timer); clearInterval(this.clockTimer); clearTimeout(this.readyTimer);
+    for (const r of this.retries.values()) clearTimeout(r.timer);
+    this.retries.clear();
     const peers = [...this.peers.values()];
     // 自分から抜けるとき: 相手に知らせる(切断の検出を待たせない)
     if (reason === 'left') for (const p of peers) this._sendCtl(p, { t: 'bye' });

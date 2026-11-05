@@ -131,6 +131,7 @@ const msg = (o) => JSON.stringify(o);
   const hello = back.last('hello');
   assert.equal(hello.id, 'p1'); assert.equal(hello.resumed, true); assert.deepEqual(hello.peers, [{ id: 'p2', name: 'B' }]);
   assert.equal(ctx.sockets[1].sent.filter((m) => m.t === 'peer-join').length, before, '再接続は新規参加として通知しない');
+  assert.equal(ctx.sockets[1].last('peer-back').id, 'p1', '戻ったことは peer-back で知らせる(P2Pが切れていれば張り直してもらう)');
   // 再接続後も同じ名前のまま
   await connect(room, 'name=C');
   assert.deepEqual(ctx.sockets[ctx.sockets.length - 1].last('hello').peers, [{ id: 'p1', name: 'A' }, { id: 'p2', name: 'B' }]);
