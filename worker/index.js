@@ -9,7 +9,7 @@
 //                                  同じIPから「同時に1ルーム」「終了後2分あける」(429 room_active / cooldown。合言葉つきなら制限なし)
 //   GET    /api/rooms/:code/info   ルームの情報 {serverId, status, players, max}
 //   GET    /api/rooms/:code/ws     WebSocket(シグナリングと世界時刻の基準だけ。ゲームのデータは流さない。ホストはいない)
-//                                  切れたあとの再接続は &id=<hello で教えた自分のid>&token=<hello で渡した token>
+//                                  切れたあとの再接続は(戻ったことは peer-back で全員へ) &id=<hello で教えた自分のid>&token=<hello で渡した token>
 // format は rbxl / rbxlx / tgw(.tgw はZIP。Workerは展開せず、R2に置いて配信するだけ)。
 // 合言葉は Authorization: Bearer <ADMIN_PASSPHRASE> で送る。
 
@@ -306,6 +306,7 @@ export class Room {
     await st.put('status', 'running');
     await st.setAlarm(Date.now() + ROOM_TTL_MS);
     server.send(JSON.stringify({ t: 'hello', id, peers: this._members(id), max: ROOM_MAX, resumed: true }));
+    this._broadcast({ t: 'peer-back', id, name: rec.name }, id); // peer-leave で名簿から外れていた人が戻った(P2Pが切れていれば張り直してもらう)
     return new Response(null, { status: 101, webSocket: client });
   }
 

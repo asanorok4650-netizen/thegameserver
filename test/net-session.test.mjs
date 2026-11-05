@@ -174,6 +174,22 @@ const e = mk('E', [9, 9, 9, 0, 0, 1]);
 await until(() => e.log.players.length === 4 && a.log.players.length === 4, 'Aの再接続後に入ったEとつながる');
 assert.equal(e.s.id, 'p5'); assert.equal(e.s.peers.size, 3, 'E は A・B・D とつながる');
 
+// 7b) P2P接続そのものが切れた(シグナリングは生きている): 先に入った側が出し直して、両側が自動でつなぎ直す
+a.s._peerLost(a.s.peers.get('p2'), true); // Aが切れを検出。Bは相手のチャネルが閉じて気づく
+await until(() => !entry(a, 'p2'), 'Bのアバターが一度消える');
+await until(() => a.s.peers.get('p2')?.ready && b.s.peers.get('p1')?.ready && entry(a, 'p2') && entry(b, 'p1'), 'A-Bが自動でつなぎ直る', 8000);
+assert.equal(a.s.peers.size, 3); assert.equal(b.s.peers.size, 3);
+
+// 7c) 後から入った側(B)のシグナリングが切れている間に、先に入った相手(A)とのP2Pも切れた: 戻ったあと、Bの頼みでAが出し直す
+{
+  const srv = b.s.ws.srv;
+  srv.close(1006, 'drop'); await room.webSocketClose(srv, 1006); // Roomは peer-leave を配る
+  await sleep(30);
+  b.s._peerLost(b.s.peers.get('p1'), true); // この間にA-B間のP2Pが切れる
+  await until(() => a.s.peers.get('p2')?.ready && b.s.peers.get('p1')?.ready && entry(b, 'p1'), 'Bの再接続後にA-Bがつながる', 10000);
+  assert.equal(b.log.closed, null); assert.equal(a.log.closed, null);
+}
+
 // 8) 全員が抜ける
 for (const x of [a, b, d, e]) x.s.leave();
 await sleep(300);
