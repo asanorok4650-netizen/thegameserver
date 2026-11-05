@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
-import { CONFIG } from '../config.js';
+import { CONFIG, DEFAULTS } from '../config.js';
 import { addServer, deleteServer, describeError, getHealth } from '../servers/api.js';
 
 const MAX_BYTES = 100 * 1024 * 1024;
 
 export default function ServerSettings({ servers, onChanged }) {
-  const [apiBase, setApiBase] = useState(CONFIG.apiBase);
+  const [apiBase, setApiBase] = useState(CONFIG.apiBaseOverride);
   const [pass, setPass] = useState(CONFIG.adminPassphrase);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -17,7 +17,7 @@ export default function ServerSettings({ servers, onChanged }) {
   function save() {
     CONFIG.apiBase = apiBase;
     CONFIG.adminPassphrase = pass;
-    setApiBase(CONFIG.apiBase);
+    setApiBase(CONFIG.apiBaseOverride);
     setMsg({ text: '保存しました', kind: 'ok' });
     onChanged();
   }
@@ -93,12 +93,12 @@ export default function ServerSettings({ servers, onChanged }) {
       <div className="section-heading">
         <div>
           <h2>サーバー管理</h2>
-          <p>worker/index.js をデプロイしたURLと、管理用の合言葉を入力します。</p>
+          <p>サーバーAPIは標準のURLを使うので、入力は不要です。自分のWorkerを使うときだけURLを入れます。管理用の合言葉は、サーバーの追加・削除に必要です。</p>
         </div>
       </div>
       <div className="panel">
-        <label className="field-label" htmlFor="api-input">サーバーAPIのURL</label>
-        <input id="api-input" className="text-input" placeholder="https://rbxl-player-api.xxxx.workers.dev"
+        <label className="field-label" htmlFor="api-input">サーバーAPIのURL(空欄なら標準のURL)</label>
+        <input id="api-input" className="text-input" placeholder={DEFAULTS.apiBase}
           autoCapitalize="off" spellCheck={false} value={apiBase} onChange={(e) => setApiBase(e.target.value)} />
         <label className="field-label" htmlFor="pass-input">管理用の合言葉(追加・削除に必要)</label>
         <input id="pass-input" className="text-input" type="password" autoComplete="off"
