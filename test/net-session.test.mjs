@@ -38,7 +38,7 @@ await room.fetch(req('/init', { method: 'POST', body: { serverId: 's1', code: 'A
 // ── ブラウザの代役 ──
 class FakeWebSocket { // クライアント側
   constructor(url) {
-    this.readyState = 0;
+    this.readyState = 0; this.timeSent = 0;
     const q = new URL(url.replace(/^ws/, 'http')).search.slice(1);
     room.fetch(req('/ws?' + q)).then((res) => {
       if (res.status !== 101) { this.readyState = 3; this.onclose?.({ code: 1006 }); return; }
@@ -47,7 +47,7 @@ class FakeWebSocket { // クライアント側
       for (const m of srv.pending.splice(0)) queueMicrotask(() => this.onmessage?.({ data: m }));
     });
   }
-  send(m) { const parsed = JSON.parse(m); if (parsed.t === 'signal') globalThis.signalMessages.push(parsed); room.webSocketMessage(this.srv, m); }
+  send(m) { const parsed = JSON.parse(m); if (parsed.t === 'signal') globalThis.signalMessages.push(parsed); if (parsed.t === 'time') this.timeSent++; room.webSocketMessage(this.srv, m); }
   close() { if (this.readyState === 3) return; this.readyState = 3; room.webSocketClose(this.srv, 1000); }
 }
 globalThis.WebSocket = FakeWebSocket;
@@ -116,6 +116,8 @@ const entry = (o, id) => o.log.snap.find((e) => e.id === id);
 // 1) 3人がつながる。ホストはいない(全員が対等)
 const a = mk('A', [10, 5, -3, 1, 16, 1]);
 await until(() => a.log.ready, 'A参加');
+await sleep(520); // 150ms間隔の初回バーストが完了するまで待つ
+assert.equal(a.s.ws.timeSent, 4, '初回のRoom時計問い合わせは4回');
 const b = mk('B', [20, 6, 7, 2, 0, 1]);
 await until(() => b.log.ready, 'B参加');
 const c = mk('C', [-30, 1, 2, 3, 8, 0]);
