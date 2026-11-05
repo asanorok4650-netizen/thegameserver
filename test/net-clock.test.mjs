@@ -65,4 +65,20 @@ function ping(c, up, down) {
   const c = mk(); c.sample(NaN, 1); c.sample(1, Infinity); c.sample(nowMs + 1000, 1);
   assert.equal(c.time(), null);
 }
+// P2Pの時計推定はRoom基準の推定だけを共有し、Peer由来の値を再共有しない。
+{
+  nowMs = 100000;
+  const c = mk();
+  ping(c, 100, 100); // Room直通は往復200ms
+  const roomBefore = c.roomTime();
+  const sentAt = nowMs;
+  nowMs += 20;
+  c.samplePeer(sentAt, roomAt(sentAt + 10) + 0.001, 0.005); // Peer側のRoom推定誤差5ms
+  assert.ok(c.peerAt === nowMs, 'Peerサンプルを記録');
+  assert.ok(Math.abs(c.time() - (roomAt(nowMs) + 0.001)) < 1e-6, 'より確かなPeer推定を利用');
+  assert.ok(Math.abs(c.roomTime() - roomBefore - 0.02) < 1e-9, 'Peer推定でRoom基準を上書きしない');
+  nowMs += 121000;
+  assert.ok(Math.abs(c.time() - c.roomTime()) < 1e-9, '古いPeer推定は使わずRoom基準へ戻る');
+}
+
 console.log('net-clock: ok');
