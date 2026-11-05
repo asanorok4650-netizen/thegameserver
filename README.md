@@ -1,101 +1,214 @@
-# RBXL Player v0.3 (React / Vite) — ホーム + アバターローダー
+# thegameserver (RBXL Player) v0.3.2
 
-v0.2のホームUI(React化したデザイン)に、パーツ組み立て式のアバターローダーを追加したものです。
-`src/style.css` は変更していません。追加スタイルは `src/avatar.css` に分けています。
+Roblox風のワールドをブラウザで作成・公開・プレイするためのプラットフォームです。React + Vite + Three.js を基盤とし、RBXL / RBXLX の読み込み、独自ワールド形式 `.tgw`、ブラウザ内Studio、組み込みスクリプト、ホストレスP2Pマルチプレイに対応しています。
 
-## 開発
+> **開発状況:** マルチプレイは現在「位置・向きの共有」を中心とした初期段階です。HP・スコア・パーツ変更・スクリプト実行結果など、ゲーム進行状態の全員同期はまだ接続されていません。
 
-開発者向けの構成・データ形式・ゲームエンジン・ロジック追加方法は [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) を参照してください。
+## 主な機能
+
+- **ホーム / ワールド一覧:** 管理者がCloudflare R2 + D1へ登録したワールドを一覧表示。一般ユーザー向けの自由アップロード機能はありません。
+- **アバター:** Robloxユーザー名からアバターを取得し、R6 / R15などのパーツをThree.jsで組み立てて表示。
+- **ワールドプレイヤー:** RBXL / RBXLX と `.tgw` を読み込み、ブラウザ内でプレイ。
+- **Studio:** ブラウザ上でパーツを編集し、Undo / Redo、ローカル下書き、`.tgw` の書き出し・公開。
+- **ゲームルール:** 重力・歩行速度・ジャンプ力、環境設定、動く足場・回転床・コンベアなど。
+- **ビジュアルスクリプト:** Blocklyでイベント処理を組み立て、制限付きIRインタープリターで実行。任意JavaScriptは評価しません。
+- **マルチプレイ:** Cloudflare Durable Objectsをシグナリングに利用し、WebRTC DataChannelでプレイヤー位置を直接交換するホストレスP2P。
+
+## 技術スタック
+
+| 領域 | 技術 |
+|---|---|
+| UI | React 18 |
+| ビルド / 開発 | Vite 5 |
+| 3D | Three.js |
+| ワールド圧縮 | fflate (ZIP) |
+| ビジュアルスクリプト | Blockly |
+| 公開API | Cloudflare Workers |
+| ワールドファイル | Cloudflare R2 |
+| ワールド一覧・制限情報 | Cloudflare D1 |
+| ルーム・シグナリング | Cloudflare Durable Objects (SQLite-backed) |
+| プレイヤー間通信 | WebRTC DataChannel |
+
+## 開発環境
+
+必要: Node.js / npm
+
 ```bash
-npm install      # three を追加したので、初回は必ず実行(package-lock.json が更新されます)
+npm install
 npm run dev
-npm test         # パーサ/リグ/ビルダーのロジックテスト(three不要)
-npm run build
 ```
-> `package-lock.json` を更新したらコミットしてください。更新しないと Cloudflare Pages の `npm ci` が失敗することがあります。
 
-## ユーザー読み込みの準備(Cloudflare Worker + APIキー)
-ブラウザからRoblox APIは直接叩けないため、`worker/proxy.js` を Cloudflare Workers にデプロイします。
-また、2025-04-02以降 Roblox の Asset Delivery は**認証なしだと401**を返すため、服・アクセサリなどアセットの取得には
-**Open Cloud の APIキー**が必要です。キーは**画面には入力せず、Workerのシークレットとして保存**します
-(ブラウザに入れたキーは誰でも見られてしまうため)。
+開発サーバー起動後、Viteが表示するURLをブラウザで開きます。
 
-### 1. Workerをデプロイ
 ```bash
-npx wrangler deploy          # wrangler.toml の main = worker/proxy.js
+npm test       # パーサー、ワールド、Studio、API、ネットワーク等のテスト
+npm run build  # 本番ビルド (dist/)
+npm run preview
 ```
-(ダッシュボードの「Edit code」に `worker/proxy.js` を貼る方法でも可)
 
-### 2. APIキーを作る
-1. Roblox の Creator Dashboard → Open Cloud → API Keys → 「Create API Key」
-2. Access Permissions で、スコープ `legacy-asset:manage`(Asset Delivery)が使えるAPI Systemを追加
-3. キーは**個人ユーザーのもの**を使う(グループのキーは不可)。公開アセットだけなら権限はこれだけで足ります
-4. IPアドレス制限は、Cloudflareの送信元IPが固定でないため空(0.0.0.0/0)のままにする
+Cloudflare Pagesで公開する場合は、ビルドコマンドを `npm run build`、出力ディレクトリを `dist` にします。
 
-### 3. キーをWorkerのシークレットに保存(リポジトリには絶対に書かない)
-```bash
-npx wrangler secret put ROBLOX_API_KEY      # 貼り付けて Enter
-```
-またはダッシュボード → Workers → 対象Worker → Settings → 「Variables and secrets」→ Add → Type: **Secret**、名前 `ROBLOX_API_KEY`。
-(シークレットは再デプロイしても消えません。`wrangler.toml` の `[vars]` には書かないでください)
+## ワールド形式
 
-### 4. 確認
-アプリの「設定」→「接続テスト」(URLは標準のものが入っているので、入力は不要です。自分のWorkerを使うときだけ、プロキシURLを入れます)。`APIキー: 設定済み` と出ればOKです。
-アセットが取得できないときは、アバター画面の「アセット」一覧にエラーの理由が出ます
-(`APIキーが設定されていません` / `無効か期限切れ` / `回数制限` など)。
+### RBXL / RBXLX
 
-### 5. 公開するとき(任意)
-`wrangler.toml` の `[vars]` に `ALLOWED_ORIGIN = "https://あなたのサイト"` を入れると、そのサイトからのリクエストだけ受け付けます。
-ブラウザ以外はOriginを偽装できるため、これだけでは完全な保護ではありません。キーのレート制限(1分あたり1000回)を
-使い切られないよう、不安な場合はCloudflareのレート制限ルールも併用してください。
-なお、取得したアセットはWorkerのエッジキャッシュに保存して、キーの利用回数を節約します
-(`*.workers.dev` でキャッシュが効くかは未確認。独自ドメインなら有効です)。
+Roblox Studioのワールドファイルを読み込みます。解析後は共通の `worldJson` に変換してシーンを構築します。RBXLの全機能を完全再現するものではなく、未対応アセットや物理・アバター表現には近似があります。
 
-## サーバー(rbxl)一覧の準備(Cloudflare R2 + D1 + Worker)
-ホーム画面には、**自分がR2/D1に登録したrbxlだけ**が並びます(誰でもアップロードできる方式は廃止)。
-rbxl本体は R2、一覧情報は D1、窓口は `worker/index.js`(合言葉で追加・削除を保護)です。
+### .tgw (thegameserver World Package)
+
+`.tgw` はZIPベースのワールドパッケージです。基本構成:
+
+- `manifest.json`: 名前、作者、形式バージョン、プレイヤー設定、ルール、ロジック設定など
+- `world.json`: スポーン地点、パーツ、環境など
+- 任意のアセットファイル
+
+現在の形式バージョンは `1.0`。座標単位はstuds、上方向は+Yです。パッケージ内に任意のJavaScriptコードは格納・実行せず、組み込みロジックIDとパラメータを参照します。ZIP展開・形式検証・サイズ上限チェックはブラウザ側で行います。
+
+## Studioとゲームロジック
+
+Studioはワールドの作成・編集・公開を行います。編集内容の下書きはブラウザのIndexedDBに保存され、公開時にWorker APIへ送信されます。
+
+組み込み機能の例:
+
+- 物理ルール: `walkSpeed` / `jumpPower` / `gravity`
+- パーツ振る舞い: `spinner` / `mover` / `bounce` / `conveyor`
+- Obbyタグ: `kill` / `checkpoint` / `goal`
+- Blocklyイベント: start / spawn / touch / leave / interval など
+- プレイヤー・パーツのプロパティ、スコア、メッセージ、テレポート、復活など
+
+スクリプトは許可された命令を表すIRへ変換し、実行量・タスク数・繰り返し回数などに上限を設けたRuntimeで処理します。
+
+## マルチプレイ (ホストレスP2P)
+
+現在の方式は**ホストなしのフルメッシュ**です。参加者は対等で、特定のプレイヤーをAuthority / ホストとして選出しません。
+
+### 接続構成
+
+1. Worker上のDurable Object `Room` がルーム作成・参加者名簿・退出通知を管理。
+2. RoomがWebSocket経由でSDP / ICEシグナリングを参加者間で中継。
+3. 各ブラウザがWebRTC DataChannelで他の参加者と直接接続。
+4. ゲームの位置データはP2Pで交換し、Durable Objectへ中継しません。
+
+### 同期データ
+
+- プレイヤーの位置・向き・速度・接地フラグ
+- 状態パケットは16バイトのバイナリ。位置は1/64 stud単位、向きはuint16。
+- 通常の送信頻度は10Hz (設定範囲5〜30Hz)。停止中は500ms間隔に抑制。
+- 受信側は連番で古いパケットを除外し、最新状態を表示に利用。
+
+### ルーム・再接続
+
+- 最大8人。参加順に `p1`, `p2` ... のIDを割り当てます。
+- 接続開始時は先に参加した側が後から参加した側へofferを送ります。
+- P2Pが切れた相手には1 / 2 / 4 / 8 / 15秒後の最大5回まで再接続を試みます。
+- シグナリングWebSocketが切れても成立済みP2Pは維持し、再接続用tokenでRoomへ復帰します。
+- Room内の世界時刻を基準にし、動く床など時刻ベースの振る舞いを揃えます。時刻の再同期は参加時に複数回、その後10分ごとに行います。
+- 全員のWebSocketが切れた場合は45秒の復帰猶予後にRoomを破棄。空のRoomは60秒で破棄します。
+
+### 現在の制約・未実装
+
+- **ゲーム進行状態は未同期:** HP、スコア、スクリプト結果、パーツの変更、クリア状態などは全員に共有されません。各端末で個別にゲームロジックが動きます。
+- **TURNサーバー未設定:** 現状はCloudflare STUNのみです。ネットワーク環境によってはP2P接続できない場合があります。
+- **フルメッシュ:** 最大7本の相手接続を各クライアントが維持します。大人数向けの中継・分割メッシュは未実装です。
+- **位置は信用ベース:** サーバー側で移動の正当性を検証する仕組みはありません。
+- ページ再読み込み時は新しい参加者として入り直します。
+
+この方式ではAuthority引き継ぎは行いません。今後、共有HP・スコア・ワールド変更などの権限が必要になった段階で、権限モデルと状態同期を別途設計します。
+
+## Cloudflare Workerのセットアップ
+
+Workerの設定ファイルは `worker/wrangler.toml` です。R2、D1、Durable Objectsのバインディングが定義されています。
+
+### 1. Cloudflareリソース
+
+必要なリソース:
+
+- R2 bucket: `rbxl-servers`
+- D1 database: `rbxl-servers-db`
+- Durable Object: `Room` (SQLite-backed)
+
+既存環境を新規構築する場合は、Cloudflareのリソースを作成し、実際に発行されたD1 database IDを `worker/wrangler.toml` に設定してください。
 
 ```bash
 cd worker
 npx wrangler r2 bucket create rbxl-servers
-npx wrangler d1 create rbxl-servers-db          # 出力された database_id を worker/wrangler.toml に貼る
+npx wrangler d1 create rbxl-servers-db
 npx wrangler d1 execute rbxl-servers-db --remote --file=./schema.sql
-npx wrangler secret put ADMIN_PASSPHRASE        # 管理用の合言葉(リポジトリには書かない)
+npx wrangler secret put ADMIN_PASSPHRASE
 npx wrangler deploy
 ```
-1. 標準のURLは `src/config.js` の `DEFAULTS` に入っています(公開されるURLで、秘密ではありません)。自分のWorkerを使うときは、デプロイ後のURL(`https://rbxl-player-api.xxxx.workers.dev`)を、アプリの「設定 → サーバー管理」に入力 → 保存 → 接続テスト。
-   Cloudflare Pagesの環境変数 `VITE_API_BASE`(プロキシは `VITE_PROXY_BASE`)に入れておけば、ビルド時の既定値になります。優先順は「設定画面の値 > 環境変数 > `DEFAULTS`」で、設定画面を空欄にして保存すると標準に戻ります。
-   管理用の合言葉・APIキーは、コードや環境変数(`VITE_*` はブラウザに公開される)に入れないでください。
-2. 同じ画面で合言葉を入れて「サーバーを追加」から rbxl を選ぶと、R2に保存されホームに表示されます。
-3. 公開するときは `worker/wrangler.toml` の `ALLOWED_ORIGIN` をサイトのURLに変更してください。
 
-API: `GET /api/servers`(一覧)/ `GET /api/servers/:id/file`(rbxl本体)/ `POST /api/servers`・`DELETE /api/servers/:id`(要合言葉)。
-アップロード上限は100MB(Workersのリクエスト上限)。合言葉はこのブラウザのlocalStorageに保存されます。
+Durable ObjectsのSQLite migration設定も `worker/wrangler.toml` に含まれています。既存環境では設定済みmigrationとリソースを確認してからデプロイしてください。
 
-### .tgw 形式(thegameserver ワールドパッケージ)
-rbxl に加えて **.tgw**(ZIP。`manifest.json` + `world.json` + 任意の assets/ など)も追加できます。
-読み込みは先頭のバイト列(`PK\x03\x04`)で判別し、rbxl は `treeToWorldJson` で world.json にしてから、
-.tgw は展開・検証してから、同じ `buildSceneFromWorld` でシーン/衝突を作ります。ZIPの展開はブラウザ側(fflate)だけで、Workerは展開しません。
-`src/tgw/`: `worldjson.js`(ツリー→world.json)/ `validate.js`(検証・上限)/ `container.js`(ZIP読み書き)/ `manifest.js`。
-Worker側は `worker/index.js` の `FORMATS` に `'tgw'` を追加してください(`rbxl` / `rbxlx` / `tgw`)。
+### 2. Worker API
 
-## 構成(追加分)
+主なHTTP API:
+
+| Method | Path | 用途 |
+|---|---|---|
+| GET | `/api/health` | 接続・設定状態 |
+| GET | `/api/servers` | 公開ワールド一覧 |
+| GET | `/api/servers/:id/file` | ワールドファイル取得 |
+| POST | `/api/servers` | ワールド追加 (管理用合言葉が必要) |
+| PUT | `/api/servers/:id` | ワールド更新 (管理用合言葉が必要) |
+| DELETE | `/api/servers/:id` | ワールド削除 (管理用合言葉が必要) |
+| POST | `/api/rooms` | マルチプレイルーム作成 |
+| GET | `/api/rooms/:code/info` | ルーム情報 |
+| WebSocket | `/api/rooms/:code/ws` | 参加・再接続・シグナリング・時刻同期 |
+
+ルーム作成には同一IP由来の制限があります。同時に1ルーム、ルーム終了後2分のクールダウンが基本です。管理用合言葉を使ったリクエストは検証用にこの制限を受けません。制限状態はD1の `room_limits` を使います。
+
+### 3. 接続先の設定
+
+`src/config.js` の既定値を利用できます。接続先の優先順位:
+
+1. アプリの設定画面で保存した値
+2. ビルド時環境変数 `VITE_API_BASE` / `VITE_PROXY_BASE`
+3. `src/config.js` の `DEFAULTS`
+
+`VITE_*` の値はブラウザへ公開されます。APIキーや管理用合言葉などの秘密情報を設定しないでください。管理用合言葉はWorker Secretの `ADMIN_PASSPHRASE` に設定します。
+
+公開時は `worker/wrangler.toml` の `ALLOWED_ORIGIN` を実際のサイトURLに合わせてください。
+
+### 4. Robloxアバター用プロキシ
+
+`src/config.js` には既定のプロキシURLがあります。プロキシの実装・デプロイはゲーム一覧Workerとは別です。APIキーが必要なアセット取得では、キーをブラウザやリポジトリに置かず、プロキシWorkerのSecretとして管理してください。プロキシの実際のソース配置・デプロイ先は利用中の環境で確認してください。
+
+## ディレクトリ構成
+
 ```
 src/
-  config.js                 設定(プロキシURL・PixelRatio。localStorage)
-  hooks/useAvatar.js        アバターの状態と読み込み(Appで保持)
-  components/
-    AvatarSection.jsx       アバターページ(入力・デモ・パーツ一覧・アセット一覧)
-    AvatarStage.jsx         Three.jsステージのReactラッパー(生成/破棄)
-    SettingsSection.jsx     設定ページ
-  avatar/                   rigs(リグ/服UV) builder(組み立て) api(取得) demo stage(3D)
-  rbx/                      lz4 rbxm(バイナリ解析) mesh(v1〜v5) accessory(抽出)
-  avatar.css
-worker/proxy.js             /asset/{id}(APIキー付きアセット取得)・/health・公開APIの中継
-test/                       Nodeで動くテスト(three/DOMはスタブ)
+  avatar/       Robloxアバター取得・組み立て・表示
+  rbx/          RBXL/RBXM解析、メッシュ・アクセサリ
+  components/   React画面・UI
+  game/         ゲームループ、ワールド構築、衝突、移動
+  studio/       ワールド編集、履歴、保存、公開
+  tgw/          .tgw読み書き・検証
+  logics/       組み込みゲームロジック
+  behaviors/    パーツ振る舞い
+  scripting/    Blocklyコンパイラー、IR、Runtime
+  net/          P2Pプロトコル、セッション、時計
+  servers/      公開ワールド一覧/APIクライアント
+worker/
+  index.js      ワールドAPI・Durable Object Room
+  room-limit.js ルーム作成制限
+  schema.sql    D1スキーマ
+  wrangler.toml Cloudflare設定
+test/           Node.jsテスト
+docs/
+  DEVELOPMENT.md 開発者向け詳細仕様
 ```
 
-## 対応状況
-- 対応: R6/R15、BodyColors、スケール、Shirt/Pants/T-Shirt(XML・バイナリ)、顔、アクセサリ(Handle+メッシュv1〜v5+テクスチャ)
-- 未対応: レイヤード服、体パーツ(メッシュ頭など)、ZSTD圧縮のrbxm(メッシュv6/v7は対応済み。v7のDracoデコーダは `public/draco/` に同梱)、R15の正確なパーツサイズ(近似値)
-- アクセサリの取り付け位置(ボディ側アタッチメント)は近似値です。実アバターで確認しながら調整します。
+## 関連ドキュメント
+
+- [開発者向けガイド](docs/DEVELOPMENT.md) — ワールド形式、ゲームエンジン、Studio、スクリプト、ネットワーク仕様
+- [Cloudflare Worker設定](worker/wrangler.toml)
+- [パッケージ定義・テストコマンド](package.json)
+
+## 開発上の注意
+
+- 実装とドキュメントが食い違う場合は、コードを正としてドキュメントを更新してください。
+- ワールド形式を変更した場合は、検証処理・Studio入出力・テスト・ドキュメントをまとめて確認してください。
+- WorkerのSecretやAPIキーをコミットしないでください。
+- ネットワーク仕様を変更した場合は、`src/net/` と `worker/index.js` の両方、および `test/net-*.test.mjs` を確認してください。
+- 実機で確認していない機能を「動作確認済み」と記載しないでください。
