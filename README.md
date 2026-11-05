@@ -40,7 +40,7 @@ npx wrangler secret put ROBLOX_API_KEY      # 貼り付けて Enter
 (シークレットは再デプロイしても消えません。`wrangler.toml` の `[vars]` には書かないでください)
 
 ### 4. 確認
-アプリの「設定」→ プロキシURLを入れて「接続テスト」。`APIキー: 設定済み` と出ればOKです。
+アプリの「設定」→「接続テスト」(URLは標準のものが入っているので、入力は不要です。自分のWorkerを使うときだけ、プロキシURLを入れます)。`APIキー: 設定済み` と出ればOKです。
 アセットが取得できないときは、アバター画面の「アセット」一覧にエラーの理由が出ます
 (`APIキーが設定されていません` / `無効か期限切れ` / `回数制限` など)。
 
@@ -63,8 +63,9 @@ npx wrangler d1 execute rbxl-servers-db --remote --file=./schema.sql
 npx wrangler secret put ADMIN_PASSPHRASE        # 管理用の合言葉(リポジトリには書かない)
 npx wrangler deploy
 ```
-1. デプロイ後のURL(`https://rbxl-player-api.xxxx.workers.dev`)を、アプリの「設定 → サーバー管理」に入力 → 保存 → 接続テスト。
-   Cloudflare Pagesの環境変数 `VITE_API_BASE` に入れておけば、ビルド時の既定値になります。
+1. 標準のURLは `src/config.js` の `DEFAULTS` に入っています(公開されるURLで、秘密ではありません)。自分のWorkerを使うときは、デプロイ後のURL(`https://rbxl-player-api.xxxx.workers.dev`)を、アプリの「設定 → サーバー管理」に入力 → 保存 → 接続テスト。
+   Cloudflare Pagesの環境変数 `VITE_API_BASE`(プロキシは `VITE_PROXY_BASE`)に入れておけば、ビルド時の既定値になります。優先順は「設定画面の値 > 環境変数 > `DEFAULTS`」で、設定画面を空欄にして保存すると標準に戻ります。
+   管理用の合言葉・APIキーは、コードや環境変数(`VITE_*` はブラウザに公開される)に入れないでください。
 2. 同じ画面で合言葉を入れて「サーバーを追加」から rbxl を選ぶと、R2に保存されホームに表示されます。
 3. 公開するときは `worker/wrangler.toml` の `ALLOWED_ORIGIN` をサイトのURLに変更してください。
 

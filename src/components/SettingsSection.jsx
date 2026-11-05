@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import { CONFIG } from '../config.js';
+import { CONFIG, DEFAULTS } from '../config.js';
 import ServerSettings from './ServerSettings.jsx';
 
 export default function SettingsSection({ servers, onServersChanged }) {
-  const [proxy, setProxy] = useState(CONFIG.proxyBase);
+  const [proxy, setProxy] = useState(CONFIG.proxyBaseOverride);
   const [pixelRatio, setPixelRatio] = useState(String(CONFIG.pixelRatioCap));
   const [msg, setMsg] = useState({ text: '', kind: '' });
 
   function save() {
     CONFIG.proxyBase = proxy;
-    setProxy(CONFIG.proxyBase);
+    setProxy(CONFIG.proxyBaseOverride);
     setMsg({ text: '保存しました', kind: 'ok' });
   }
 
@@ -54,15 +54,15 @@ export default function SettingsSection({ servers, onServersChanged }) {
         <div className="section-heading">
           <div>
             <h2>Robloxプロキシ</h2>
-            <p>ユーザー読み込みに必要です。worker/proxy.js をCloudflare WorkersにデプロイしたURLを入力します。</p>
+            <p>ユーザー読み込みに使います。標準のプロキシを使うので、入力は不要です。自分のWorkerを使うときだけURLを入れます。</p>
           </div>
         </div>
         <div className="panel">
-          <label className="field-label" htmlFor="proxy-input">プロキシURL</label>
+          <label className="field-label" htmlFor="proxy-input">プロキシURL(空欄なら標準のURL)</label>
           <input
             id="proxy-input"
             className="text-input"
-            placeholder="https://rbxl-player-proxy.xxxx.workers.dev"
+            placeholder={DEFAULTS.proxyBase}
             autoCapitalize="off"
             spellCheck={false}
             value={proxy}
