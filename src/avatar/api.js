@@ -3,6 +3,7 @@
 import { CONFIG } from '../config.js';
 import { DEFAULT_SCALES, brickHex } from './rigs.js';
 import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
+import { parseModel, modelFormat } from '../rbx/model.js';
 import { parseMeshAsync } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
 import { extractBodyPart, describeTree } from '../rbx/bodypart.js';
@@ -135,11 +136,15 @@ export async function textureForAsset(assetId) {
   throw new ApiError('NO_TEXTURE', `アセット ${assetId} から画像を特定できません`);
 }
 
-/** アクセサリ(Hat/Hair/Face/Neck/Shoulder/Front/Back/Waist)を読み込む → 描画用データ */
+/** アクセサリ(Hat/Hair/Face/Neck/Shoulder/Front/Back/Waist)を読み込む → 描画用データ。バイナリ・XMLの両形式に対応 */
 export async function loadAccessory(assetId) {
   const buf = await assetBytes(assetId);
-  if (!isBinaryRbxm(buf)) throw new ApiError('UNSUPPORTED_FORMAT', 'XML形式のアクセサリは未対応です');
-  const acc = extractAccessory(parseRbxm(buf));
+  const fmt = modelFormat(buf);
+  if (!fmt) throw new ApiError('UNSUPPORTED_FORMAT', 'アクセサリの形式を判別できません(バイナリrbxmでもXMLでもありません)');
+  let tree;
+  try { tree = parseModel(buf); }
+  catch (e) { throw new ApiError('PARSE_ERROR', `アクセサリ(${fmt === 'xml' ? 'XML' : 'バイナリ'}形式)の解析に失敗しました: ${e.message}`); }
+  const acc = extractAccessory(tree);
   if (!acc) throw new ApiError('NO_HANDLE', 'Handleが見つかりません');
   let geometry;
   if (isPrimitiveType(acc.handle.meshType)) { // SpecialMesh の組み込み形状(Brick/Sphere/Cylinder/Wedge/Head など)
