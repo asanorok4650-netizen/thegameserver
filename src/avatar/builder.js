@@ -45,17 +45,34 @@ function remapBoxUV(geo, faceRects) {
  * メッシュ(カスタム)パーツ用: メッシュ自身のUVには頼らず、バウンディングボックスへの箱投影でテンプレートUVを振り直す。
  * 三角形ごとに法線で面(+x,-x,+y,-y,+z,-z)を決めるので、面の境目で引き伸ばされない(その分、頂点を分離した非インデックス形状になる)。
  * 面ごとのu/vの向きは remapBoxUV(標準の箱)と同じ。返すUVは v=0 が画像の上(texture.flipY=false 用)。
+ * skipNeck: 上半身(UpperTorso)の上に突き出た首の部分には服を貼らない(テンプレートの空き領域=ボディカラーを当てる)。
+ *           服の縦の基準は、首を除いた胴の本体の高さにする。
  */
-function projectClothUV(srcGeo, faceRects) {
+function projectClothUV(srcGeo, faceRects, skipNeck = false) {
   const geo = srcGeo.index ? srcGeo.toNonIndexed() : srcGeo;
   const pos = geo.attributes.position, nor = geo.attributes.normal;
   geo.computeBoundingBox();
   const bb = geo.boundingBox;
-  const cx = (bb.min.x + bb.max.x) / 2, cy = (bb.min.y + bb.max.y) / 2, cz = (bb.min.z + bb.max.z) / 2;
-  const w = bb.max.x - bb.min.x || 1, h = bb.max.y - bb.min.y || 1, d = bb.max.z - bb.min.z || 1;
+  const cx = (bb.min.x + bb.max.x) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  const w = bb.max.x - bb.min.x || 1, d = bb.max.z - bb.min.z || 1;
+  // 胴の本体の上端: 横幅の外側(肩まわり)にある頂点の最高点。首の突起が無ければ bbox の上端と同じ
+  let top = bb.max.y;
+  if (skipNeck) {
+    let ys = -Infinity;
+    for (let i = 0; i < pos.count; i++) if (Math.abs(pos.getX(i) - cx) > w * 0.3) ys = Math.max(ys, pos.getY(i));
+    if (Number.isFinite(ys) && ys < bb.max.y - (bb.max.y - bb.min.y) * 0.03) top = ys;
+  }
+  const neck = top < bb.max.y;
+  const h = top - bb.min.y || 1;
+  const cy = (top + bb.min.y) / 2;
+  const blankU = 4 / TEMPLATE.w, blankV = 4 / TEMPLATE.h; // テンプレート左上の空き(何も描かれない)ピクセル
   const uvs = new Float32Array(pos.count * 2);
   const c01 = (x) => Math.min(1, Math.max(0, x));
   for (let t = 0; t + 2 < pos.count; t += 3) {
+    if (neck && (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3 > top + 1e-4) { // 首の三角形
+      for (let k = 0; k < 3; k++) { uvs[(t + k) * 2] = blankU; uvs[(t + k) * 2 + 1] = blankV; }
+      continue;
+    }
     let nx = 0, ny = 0, nz = 0;
     for (let k = 0; k < 3; k++) { nx += nor.getX(t + k); ny += nor.getY(t + k); nz += nor.getZ(t + k); }
     const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
@@ -227,7 +244,7 @@ function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   // 自前テクスチャが無い胴・腕・脚には、ボディカラー+クラシック服のテンプレートを箱投影で貼る(手・足・頭は対象外)
   let clothed = false;
   if (!map && def.cloth && def.shape !== 'head' && clothLayers(def.cloth).some((L) => clothing[L])) {
-    geo = projectClothUV(geo, faceRectsFor(def.cloth, def.slice));
+    geo = projectClothUV(geo, faceRectsFor(def.cloth, def.slice), def.name === 'UpperTorso');
     map = newTexture(paintClothCanvas(colorHex, clothLayers(def.cloth), clothing));
     map.flipY = false; // projectClothUV は v=0 が画像の上
     clothed = true;
