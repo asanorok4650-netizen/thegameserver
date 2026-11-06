@@ -45,8 +45,10 @@ function remapBoxUV(geo, faceRects) {
  * メッシュ(カスタム)パーツ用: メッシュ自身のUVには頼らず、バウンディングボックスへの箱投影でテンプレートUVを振り直す。
  * 三角形ごとに法線で面(+x,-x,+y,-y,+z,-z)を決めるので、面の境目で引き伸ばされない(その分、頂点を分離した非インデックス形状になる)。
  * 面ごとのu/vの向きは remapBoxUV(標準の箱)と同じ。返すUVは v=0 が画像の上(texture.flipY=false 用)。
- * skipNeck: 上半身(UpperTorso)の上に突き出た首の部分には服を貼らない。服の縦の基準は、首を除いた胴の本体の高さにする。
+ * skipNeck: 上半身(UpperTorso)の上に突き出た首には服を貼らない。服の縦の基準は、首を除いた胴の本体の高さにする。
  *           首の三角形は末尾にまとめ、geometry.groups の materialIndex=1(=ボディカラーのみの素材)にする。
+ *           首 = 本体の上端(肩の最高点)より上にある「ほぼ垂直な側面」または「首の上半分(先端)」。
+ *           肩の上面の斜面(首の付け根に向かって上がる部分)は胴の上面として、服(ネックレス等)を貼る。
  */
 function projectClothUV(srcGeo, faceRects, skipNeck = false) {
   const geo = srcGeo.index ? srcGeo.toNonIndexed() : srcGeo;
@@ -63,6 +65,7 @@ function projectClothUV(srcGeo, faceRects, skipNeck = false) {
     if (Number.isFinite(ys) && ys < bb.max.y - (bb.max.y - bb.min.y) * 0.03) top = ys;
   }
   const neck = top < bb.max.y;
+  const neckMid = top + (bb.max.y - top) * 0.5; // 首の上半分(先端)の境目
   const h = top - bb.min.y || 1;
   const cy = (top + bb.min.y) / 2;
   const nTri = Math.floor(pos.count / 3);
@@ -70,9 +73,15 @@ function projectClothUV(srcGeo, faceRects, skipNeck = false) {
   const uvs = new Float32Array(pos.count * 2);
   const c01 = (x) => Math.min(1, Math.max(0, x));
   for (let t = 0; t + 2 < pos.count; t += 3) {
-    if (neck && (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3 > top + 1e-4) { neckTri[t / 3] = 1; continue; } // 首の三角形
     let nx = 0, ny = 0, nz = 0;
     for (let k = 0; k < 3; k++) { nx += nor.getX(t + k); ny += nor.getY(t + k); nz += nor.getZ(t + k); }
+    if (neck) {
+      const gy = (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3;
+      if (gy > top + 1e-4) {
+        const len = Math.hypot(nx, ny, nz) || 1;
+        if (Math.abs(ny) / len < 0.5 || gy > neckMid) { neckTri[t / 3] = 1; continue; } // 首の側面・先端
+      }
+    }
     const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
     let f;
     if (ax >= ay && ax >= az) f = nx > 0 ? 0 : 1;
