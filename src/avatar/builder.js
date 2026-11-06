@@ -237,7 +237,9 @@ function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.userData.clothed = clothed;
   if (info.transparency >= 0.99) mesh.visible = false; // ヘッドレスなど
-  if (def.shape === 'head' && info.transparency < 0.99) {
+  // 顔の板: 顔アセットがある、または頭メッシュに顔が焼き込まれていない(自前テクスチャ無し)ときだけ付ける。
+  // 顔入りテクスチャ付きの頭(ダイナミックヘッド等)に既定のにっこり顔を重ねると、頭から浮いて見えてしまう。
+  if (def.shape === 'head' && info.transparency < 0.99 && (faceBitmap || !info.texture)) {
     geo.computeBoundingBox();
     const bb = geo.boundingBox, cx = (bb.min.x + bb.max.x) / 2, cy = (bb.min.y + bb.max.y) / 2, w = bb.max.x - bb.min.x;
     let zFront = Infinity; // 顔の中心付近で一番手前の頂点に合わせる(曲面でも浮きにくい)
