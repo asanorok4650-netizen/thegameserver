@@ -45,8 +45,8 @@ function remapBoxUV(geo, faceRects) {
  * メッシュ(カスタム)パーツ用: メッシュ自身のUVには頼らず、バウンディングボックスへの箱投影でテンプレートUVを振り直す。
  * 三角形ごとに法線で面(+x,-x,+y,-y,+z,-z)を決めるので、面の境目で引き伸ばされない(その分、頂点を分離した非インデックス形状になる)。
  * 面ごとのu/vの向きは remapBoxUV(標準の箱)と同じ。返すUVは v=0 が画像の上(texture.flipY=false 用)。
- * skipNeck: 上半身(UpperTorso)の上に突き出た首の部分には服を貼らない(テンプレートの空き領域=ボディカラーを当てる)。
- *           服の縦の基準は、首を除いた胴の本体の高さにする。
+ * skipNeck: 上半身(UpperTorso)の上に突き出た首の部分には服を貼らない。服の縦の基準は、首を除いた胴の本体の高さにする。
+ *           首の三角形は末尾にまとめ、geometry.groups の materialIndex=1(=ボディカラーのみの素材)にする。
  */
 function projectClothUV(srcGeo, faceRects, skipNeck = false) {
   const geo = srcGeo.index ? srcGeo.toNonIndexed() : srcGeo;
@@ -65,14 +65,12 @@ function projectClothUV(srcGeo, faceRects, skipNeck = false) {
   const neck = top < bb.max.y;
   const h = top - bb.min.y || 1;
   const cy = (top + bb.min.y) / 2;
-  const blankU = 4 / TEMPLATE.w, blankV = 4 / TEMPLATE.h; // テンプレート左上の空き(何も描かれない)ピクセル
+  const nTri = Math.floor(pos.count / 3);
+  const neckTri = new Uint8Array(nTri);
   const uvs = new Float32Array(pos.count * 2);
   const c01 = (x) => Math.min(1, Math.max(0, x));
   for (let t = 0; t + 2 < pos.count; t += 3) {
-    if (neck && (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3 > top + 1e-4) { // 首の三角形
-      for (let k = 0; k < 3; k++) { uvs[(t + k) * 2] = blankU; uvs[(t + k) * 2 + 1] = blankV; }
-      continue;
-    }
+    if (neck && (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3 > top + 1e-4) { neckTri[t / 3] = 1; continue; } // 首の三角形
     let nx = 0, ny = 0, nz = 0;
     for (let k = 0; k < 3; k++) { nx += nor.getX(t + k); ny += nor.getY(t + k); nz += nor.getZ(t + k); }
     const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
@@ -96,7 +94,27 @@ function projectClothUV(srcGeo, faceRects, skipNeck = false) {
       uvs[(t + k) * 2 + 1] = (r[1] + (1 - v) * r[3]) / TEMPLATE.h;
     }
   }
-  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  let nNeck = 0;
+  for (let i = 0; i < nTri; i++) nNeck += neckTri[i];
+  if (nNeck && nNeck < nTri) { // 首の三角形を末尾に並べ替えて、素材グループ(0=服つき, 1=ボディカラー)に分ける
+    const order = [];
+    for (let i = 0; i < nTri; i++) if (!neckTri[i]) order.push(i);
+    for (let i = 0; i < nTri; i++) if (neckTri[i]) order.push(i);
+    const reorder = (src, size) => {
+      const dst = new Float32Array(src.length);
+      order.forEach((ti, n) => { for (let j = 0; j < 3 * size; j++) dst[n * 3 * size + j] = src[ti * 3 * size + j]; });
+      return new THREE.BufferAttribute(dst, size);
+    };
+    const pArr = pos.array, nArr = nor.array;
+    geo.setAttribute('position', reorder(pArr, 3));
+    geo.setAttribute('normal', reorder(nArr, 3));
+    geo.setAttribute('uv', reorder(uvs, 2));
+    geo.clearGroups();
+    geo.addGroup(0, (nTri - nNeck) * 3, 0);
+    geo.addGroup((nTri - nNeck) * 3, nNeck * 3, 1);
+  } else {
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  }
   return geo;
 }
 
@@ -251,7 +269,15 @@ function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   }
   const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.8, side: THREE.DoubleSide,
     color: map ? 0xffffff : colorHex, transparent: info.transparency > 0, opacity: 1 - (info.transparency || 0) });
-  const mesh = new THREE.Mesh(geo, mat);
+  let material = mat;
+  if (geo.groups.length > 1) { // 首の突起など、服を貼らない部分はボディカラーのみの素材(グループ1)
+    const skin = mat.clone();
+    skin.map = null;
+    skin.color.set(colorHex);
+    skin.needsUpdate = true;
+    material = [mat, skin];
+  }
+  const mesh = new THREE.Mesh(geo, material);
   mesh.userData.clothed = clothed;
   if (info.transparency >= 0.99) mesh.visible = false; // ヘッドレスなど
   // 顔の板: 顔アセットがある、または頭メッシュに顔が焼き込まれていない(自前テクスチャ無し)ときだけ付ける。
