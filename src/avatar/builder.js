@@ -41,6 +41,61 @@ function remapBoxUV(geo, faceRects) {
   uv.needsUpdate = true;
 }
 
+/**
+ * メッシュ(カスタム)パーツ用: メッシュ自身のUVには頼らず、バウンディングボックスへの箱投影でテンプレートUVを振り直す。
+ * 三角形ごとに法線で面(+x,-x,+y,-y,+z,-z)を決めるので、面の境目で引き伸ばされない(その分、頂点を分離した非インデックス形状になる)。
+ * 面ごとのu/vの向きは remapBoxUV(標準の箱)と同じ。返すUVは v=0 が画像の上(texture.flipY=false 用)。
+ */
+function projectClothUV(srcGeo, faceRects) {
+  const geo = srcGeo.index ? srcGeo.toNonIndexed() : srcGeo;
+  const pos = geo.attributes.position, nor = geo.attributes.normal;
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const cx = (bb.min.x + bb.max.x) / 2, cy = (bb.min.y + bb.max.y) / 2, cz = (bb.min.z + bb.max.z) / 2;
+  const w = bb.max.x - bb.min.x || 1, h = bb.max.y - bb.min.y || 1, d = bb.max.z - bb.min.z || 1;
+  const uvs = new Float32Array(pos.count * 2);
+  const c01 = (x) => Math.min(1, Math.max(0, x));
+  for (let t = 0; t + 2 < pos.count; t += 3) {
+    let nx = 0, ny = 0, nz = 0;
+    for (let k = 0; k < 3; k++) { nx += nor.getX(t + k); ny += nor.getY(t + k); nz += nor.getZ(t + k); }
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    let f;
+    if (ax >= ay && ax >= az) f = nx > 0 ? 0 : 1;
+    else if (ay >= az) f = ny > 0 ? 2 : 3;
+    else f = nz > 0 ? 4 : 5;
+    const r = faceRects[f];
+    for (let k = 0; k < 3; k++) {
+      const x = pos.getX(t + k) - cx, y = pos.getY(t + k) - cy, z = pos.getZ(t + k) - cz;
+      let u, v; // BoxGeometryの各面と同じ向き(v=1が上)
+      if (f === 0) { u = (d / 2 - z) / d; v = (y + h / 2) / h; }
+      else if (f === 1) { u = (z + d / 2) / d; v = (y + h / 2) / h; }
+      else if (f === 2) { u = (x + w / 2) / w; v = 1 - (z + d / 2) / d; }
+      else if (f === 3) { u = (x + w / 2) / w; v = (z + d / 2) / d; }
+      else if (f === 4) { u = (x + w / 2) / w; v = (y + h / 2) / h; }
+      else { u = (w / 2 - x) / w; v = (y + h / 2) / h; }
+      u = c01(u); v = c01(v);
+      if (f === 2 || f === 3) { u = 1 - u; v = 1 - v; }
+      uvs[(t + k) * 2] = (r[0] + u * r[2]) / TEMPLATE.w;
+      uvs[(t + k) * 2 + 1] = (r[1] + (1 - v) * r[3]) / TEMPLATE.h;
+    }
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  return geo;
+}
+
+/** R15でカスタムパーツを含む上下の組(胴・腕・脚)は、実際のパーツ高さの比で服テンプレートの縦の分割位置を決め直す。 */
+const SLICE_GROUPS = [['UpperTorso', 'LowerTorso'], ['LeftUpperArm', 'LeftLowerArm'], ['RightUpperArm', 'RightLowerArm'],
+  ['LeftUpperLeg', 'LeftLowerLeg'], ['RightUpperLeg', 'RightLowerLeg']];
+function refineSlices(layout) {
+  const by = Object.fromEntries(layout.map((d) => [d.name, d]));
+  for (const [a, b] of SLICE_GROUPS) {
+    const A = by[a], B = by[b];
+    if (!A || !B || !(A.custom || B.custom)) continue;
+    const f = A.size[1] / (A.size[1] + B.size[1]);
+    A.slice = [0, f]; B.slice = [f, 1];
+  }
+}
+
 function newTexture(canvas) {
   const t = new THREE.CanvasTexture(canvas);
   t.colorSpace = THREE.SRGBColorSpace;
@@ -62,17 +117,6 @@ function paintClothCanvas(colorHex, layers, clothing) {
     else g.drawImage(img, 0, 0, c.width, c.height);
   }
   return c;
-}
-
-/**
- * カスタム(メッシュ)パーツに重ねるクラシック服を、パーツ名から決める(R6/R15どちらの名前も可)。
- * メッシュのUVは服テンプレート(585x559)の配置に沿っている前提で、テンプレート全体を貼る。
- */
-function meshClothLayers(name) {
-  if (/Torso$/.test(name)) return ['pants', 'shirt', 'tshirt'];
-  if (/Arm|Hand/.test(name)) return ['shirt'];
-  if (/Leg|Foot/.test(name)) return ['pants'];
-  return [];
 }
 
 /** 既定の顔(にっこり)。カスタムの顔が無い場合に使う。 */
@@ -142,7 +186,7 @@ function buildAccessoryMesh(acc, rigType, layout) {
   return { mesh, attachedTo: body.part };
 }
 
-/** カスタムのボディパーツ1つをメッシュ化する。頭なら顔も、頭以外で自前テクスチャが無ければクラシック服も貼る。 */
+/** カスタムのボディパーツ1つをメッシュ化する。頭なら顔も、服の対象パーツで自前テクスチャが無ければクラシック服も貼る。 */
 function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   const info = def.custom.info, g = info.geometry;
   const pos = new Float32Array(g.positions);
@@ -157,22 +201,20 @@ function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   } else { // SpecialMesh: 生の頂点 × Scale + Offset
     for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) pos[i + k] = pos[i + k] * info.scale[k] + info.offset[k];
   }
-  const geo = new THREE.BufferGeometry();
+  let geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(g.normals), 3));
   geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.uvs), 2));
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(g.indices), 1));
   let map = null;
   if (info.texture) { map = new THREE.Texture(info.texture); map.flipY = false; map.colorSpace = THREE.SRGBColorSpace; map.needsUpdate = true; }
-  // 自前テクスチャが無いメッシュパーツには、ボディカラー+クラシック服を重ねたテンプレートを、メッシュ自身のUVで貼る
+  // 自前テクスチャが無い胴・腕・脚には、ボディカラー+クラシック服のテンプレートを箱投影で貼る(手・足・頭は対象外)
   let clothed = false;
-  if (!map && def.shape !== 'head') {
-    const layers = meshClothLayers(def.name).filter((L) => clothing[L]);
-    if (layers.length) {
-      map = newTexture(paintClothCanvas(colorHex, layers, clothing));
-      map.flipY = false; // メッシュのUVは v=0 が画像の上
-      clothed = true;
-    }
+  if (!map && def.cloth && def.shape !== 'head' && clothLayers(def.cloth).some((L) => clothing[L])) {
+    geo = projectClothUV(geo, faceRectsFor(def.cloth, def.slice));
+    map = newTexture(paintClothCanvas(colorHex, clothLayers(def.cloth), clothing));
+    map.flipY = false; // projectClothUV は v=0 が画像の上
+    clothed = true;
   }
   const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.8, side: THREE.DoubleSide,
     color: map ? 0xffffff : colorHex, transparent: info.transparency > 0, opacity: 1 - (info.transparency || 0) });
@@ -210,6 +252,7 @@ export function buildAvatar(desc) {
   const parts = [];
 
   const layout = applyBodyParts(layoutFor(desc.rigType, desc.scales), desc.rigType, desc.scales || {}, desc.bodyParts).layout;
+  if (desc.rigType !== 'R6') refineSlices(layout);
   const diag = layout.some((d) => d.custom) ? describeBodyParts(layout, desc.scales || {}) : '';
   for (const def of layout) {
     const colorHex = (desc.colors && desc.colors[def.color]) || '#A3A2A5';
