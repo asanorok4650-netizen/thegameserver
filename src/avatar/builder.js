@@ -103,6 +103,22 @@ function newTexture(canvas) {
   return t;
 }
 
+/**
+ * 自前テクスチャ付きのボディパーツ用: ボディカラーの上にテクスチャを重ねる。
+ * 透明部分(肌など)をそのまま描くと黒くなるので、そこにボディカラーが出るようにする。UVは v=0 が画像の上(flipY=false)。
+ */
+function textureOverColor(img, colorHex) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.fillStyle = colorHex;
+  g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0);
+  const t = newTexture(c);
+  t.flipY = false;
+  return t;
+}
+
 /** ボディカラーで塗ったテンプレートの上に、パンツ→シャツ→Tシャツの順に重ねる。 */
 function paintClothCanvas(colorHex, layers, clothing) {
   const c = document.createElement('canvas');
@@ -207,7 +223,7 @@ function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.uvs), 2));
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(g.indices), 1));
   let map = null;
-  if (info.texture) { map = new THREE.Texture(info.texture); map.flipY = false; map.colorSpace = THREE.SRGBColorSpace; map.needsUpdate = true; }
+  if (info.texture) map = textureOverColor(info.texture, colorHex); // 透明部分にボディカラーを出す(黒ずみ防止)
   // 自前テクスチャが無い胴・腕・脚には、ボディカラー+クラシック服のテンプレートを箱投影で貼る(手・足・頭は対象外)
   let clothed = false;
   if (!map && def.cloth && def.shape !== 'head' && clothLayers(def.cloth).some((L) => clothing[L])) {
