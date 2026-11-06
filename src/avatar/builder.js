@@ -64,6 +64,17 @@ function paintClothCanvas(colorHex, layers, clothing) {
   return c;
 }
 
+/**
+ * カスタム(メッシュ)パーツに重ねるクラシック服を、パーツ名から決める(R6/R15どちらの名前も可)。
+ * メッシュのUVは服テンプレート(585x559)の配置に沿っている前提で、テンプレート全体を貼る。
+ */
+function meshClothLayers(name) {
+  if (/Torso$/.test(name)) return ['pants', 'shirt', 'tshirt'];
+  if (/Arm|Hand/.test(name)) return ['shirt'];
+  if (/Leg|Foot/.test(name)) return ['pants'];
+  return [];
+}
+
 /** 既定の顔(にっこり)。カスタムの顔が無い場合に使う。 */
 function defaultFaceCanvas() {
   const c = document.createElement('canvas');
@@ -131,8 +142,8 @@ function buildAccessoryMesh(acc, rigType, layout) {
   return { mesh, attachedTo: body.part };
 }
 
-/** カスタムのボディパーツ1つをメッシュ化する。頭なら顔も貼る。 */
-function buildCustomPart(def, colorHex, faceBitmap) {
+/** カスタムのボディパーツ1つをメッシュ化する。頭なら顔も、頭以外で自前テクスチャが無ければクラシック服も貼る。 */
+function buildCustomPart(def, colorHex, faceBitmap, clothing = {}) {
   const info = def.custom.info, g = info.geometry;
   const pos = new Float32Array(g.positions);
   if (info.kind === 'meshpart') { // バウンディングボックス中心を原点に、Sizeへ合わせて拡縮
@@ -153,9 +164,20 @@ function buildCustomPart(def, colorHex, faceBitmap) {
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(g.indices), 1));
   let map = null;
   if (info.texture) { map = new THREE.Texture(info.texture); map.flipY = false; map.colorSpace = THREE.SRGBColorSpace; map.needsUpdate = true; }
+  // 自前テクスチャが無いメッシュパーツには、ボディカラー+クラシック服を重ねたテンプレートを、メッシュ自身のUVで貼る
+  let clothed = false;
+  if (!map && def.shape !== 'head') {
+    const layers = meshClothLayers(def.name).filter((L) => clothing[L]);
+    if (layers.length) {
+      map = newTexture(paintClothCanvas(colorHex, layers, clothing));
+      map.flipY = false; // メッシュのUVは v=0 が画像の上
+      clothed = true;
+    }
+  }
   const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.8, side: THREE.DoubleSide,
     color: map ? 0xffffff : colorHex, transparent: info.transparency > 0, opacity: 1 - (info.transparency || 0) });
   const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData.clothed = clothed;
   if (info.transparency >= 0.99) mesh.visible = false; // ヘッドレスなど
   if (def.shape === 'head' && info.transparency < 0.99) {
     geo.computeBoundingBox();
@@ -193,7 +215,7 @@ export function buildAvatar(desc) {
     const colorHex = (desc.colors && desc.colors[def.color]) || '#A3A2A5';
     let mesh;
     if (def.custom) {
-      mesh = buildCustomPart(def, colorHex, desc.face);
+      mesh = buildCustomPart(def, colorHex, desc.face, clothing);
     } else if (def.shape === 'head') {
       const geo = roundedBoxGeometry(def.size, 0.22 * def.size[0] / 1.25);
       mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.75 }));
@@ -225,7 +247,8 @@ export function buildAvatar(desc) {
       def.rot[3], def.rot[4], def.rot[5], 0, def.rot[6], def.rot[7], def.rot[8], 0, 0, 0, 0, 1));
     group.add(mesh);
     parts.push({ name: def.name, color: def.color, object: mesh, custom: !!def.custom,
-      clothed: !def.custom && !!(def.cloth && clothLayers(def.cloth).some((L) => clothing[L])) });
+      clothed: def.custom ? !!mesh.userData.clothed
+        : !!(def.cloth && clothLayers(def.cloth).some((L) => clothing[L])) });
   }
   for (const acc of desc.accessories || []) {
     try {
