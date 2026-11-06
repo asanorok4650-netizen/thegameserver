@@ -1,6 +1,7 @@
 // ボディパーツ(Head/Torso/Arm/Leg/DynamicHead)のアセットから、描画に必要な情報を取り出す。THREE非依存。
 // R15: MeshPart(UpperTorso など)。R15ArtistIntent / R15Fixed フォルダがあれば両方を保持する。
 // R6 : Part + SpecialMesh(FileMesh)。R6 フォルダがあればそちらを優先。
+// 頭だけは、親の Part が無い「裸の SpecialMesh」1個だけのアセット(クラシックの頭)もある。その場合はメッシュだけを頭として使う。
 import { parseAssetUri, readSpecialMesh } from './accessory.js';
 import { isPrimitiveType } from './primitives.js';
 
@@ -53,6 +54,18 @@ function readPart(inst) {
 }
 
 /**
+ * 親の Part が無い SpecialMesh(FileMesh)だけから、頭の情報を作る。Part.Size が無いので標準の頭の大きさで代用する
+ * (R15=1.2 の立方体 / R6=2×1×1)。アタッチメントは無し(頭の位置・帽子の取り付けは標準位置)。
+ */
+function readBareSpecialMesh(sm, rigType) {
+  const s = readSpecialMesh(sm);
+  if (isPrimitiveType(s.meshType) || !parseAssetUri(s.meshUri)) return null;
+  return { size: rigType === 'R6' ? [2, 1, 1] : [1.2, 1.2, 1.2], color: null, transparency: 0, kind: 'special',
+    meshType: s.meshType, meshUri: s.meshUri, textureUri: s.textureUri, scale: s.scale, offset: s.offset,
+    attachments: {}, cframe: null };
+}
+
+/**
  * @returns null | { rig, parts: { [partName]: { fixed: info|null, artist: info|null } } }
  *   info = { kind, size, color, transparency, meshUri, textureUri, scale, offset, attachments }
  */
@@ -86,6 +99,14 @@ export function extractBodyPart(tree, rigType, slot) {
     };
     const pick = find(parts.filter((i) => !inFolder(i, ['R6']))) || find(parts.filter((i) => inFolder(i, ['R6'])));
     if (pick) out.Head = { fixed: pick.info, artist: pick.info };
+  }
+  if (!Object.keys(out).length && slot === 'head') {
+    // 親の Part が無い裸の SpecialMesh(クラシックの頭アセット)。FileMeshのものだけを頭のメッシュとして使う
+    for (const sm of tree.instances.values()) {
+      if (sm.className !== 'SpecialMesh' || (sm.parent && /Part$/.test(sm.parent.className))) continue;
+      const info = readBareSpecialMesh(sm, rigType);
+      if (info) { out.Head = { fixed: info, artist: info }; break; }
+    }
   }
   return Object.keys(out).length ? { rig: rigType, parts: out } : null;
 }
