@@ -76,10 +76,15 @@ export function extractBodyPart(tree, rigType, slot) {
       if (e.fixed || e.artist) out[name] = e;
     }
   }
-  if (!Object.keys(out).length && rigType !== 'R6' && slot === 'head') { // DynamicHeadなど: 名前が違っていても、メッシュを持つMeshPartを頭として使う
-    const cand = parts.filter((i) => i.className === 'MeshPart' && !inFolder(i, ['R6']))
-      .map((i) => ({ i, info: readPart(i) })).filter((x) => x.info);
-    const pick = cand.find((x) => /head/i.test(nm(x.i))) || cand[0];
+  if (!Object.keys(out).length && rigType !== 'R6' && slot === 'head') {
+    // DynamicHeadなど: 名前が違っていても、メッシュ(FileMesh)を持つパーツ(MeshPart / Part+SpecialMesh)を頭として使う。
+    // R15用が無いR6専用の頭(Part+SpecialMesh)は、Robloxと同様にR15でもそのメッシュを頭に当てる(R6フォルダ内も探す)。
+    // 組み込み形状(Head/Brick等)のSpecialMeshは対象外(標準の頭のまま)。
+    const find = (list) => {
+      const cand = list.map((i) => ({ i, info: readPart(i) })).filter((x) => x.info && !isPrimitiveType(x.info.meshType));
+      return cand.find((x) => /head/i.test(nm(x.i))) || cand[0];
+    };
+    const pick = find(parts.filter((i) => !inFolder(i, ['R6']))) || find(parts.filter((i) => inFolder(i, ['R6'])));
     if (pick) out.Head = { fixed: pick.info, artist: pick.info };
   }
   return Object.keys(out).length ? { rig: rigType, parts: out } : null;
