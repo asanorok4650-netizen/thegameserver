@@ -14,6 +14,7 @@ import { RemotePlayers } from './remote.js';
 import { PlayerRegistry } from './players.js';
 import { newStats, writeStat, damageStat, healStat, resetStat } from './playerstats.js';
 import { validGameMsg } from '../net/appmsg.js';
+import { createBloom } from './bloom.js';
 
 const REMOTE_SY = [0.9, 2.65, 4.4]; // 他のプレイヤーの接触判定の高さ(アバターの大きさは届かないので既定の体格)
 const RADIUS = 0.9; // 歩く速さ・ジャンプ力・重力は manifest.rules(game.rules)から取る
@@ -28,6 +29,7 @@ export class Game {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x9ec9ff);
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.5, 4000);
+    this.bloom = createBloom(this.renderer, this.scene, this.camera); // CONFIG.bloom が false なら null(従来の描画)
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x8a8f9c, 1.5);
     this.scene.add(this.hemi);
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -89,8 +91,10 @@ export class Game {
 
   resize() {
     const w = Math.max(1, this.host.clientWidth), h = Math.max(1, this.host.clientHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, CONFIG.pixelRatioCap));
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, CONFIG.pixelRatioCap);
+    this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(w, h, false);
+    this.bloom?.setSize(w, h, pixelRatio);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -620,7 +624,7 @@ export class Game {
     const tx = this.p.x, ty = this.p.y + this.height * 0.75, tz = this.p.z;
     this.camera.position.set(tx + Math.sin(this.yaw) * cp * this.dist, ty + Math.sin(this.pitch) * this.dist, tz + Math.cos(this.yaw) * cp * this.dist);
     this.camera.lookAt(tx, ty, tz);
-    this.renderer.render(this.scene, this.camera);
+    if (this.bloom) this.bloom.render(dt); else this.renderer.render(this.scene, this.camera);
   }
 
   dispose() {
@@ -633,6 +637,7 @@ export class Game {
     this.renderer.domElement.removeEventListener('wheel', this._onWheel);
     if (this.holder) { this.scene.remove(this.holder); disposeObject(this.holder); }
     if (this.world) { this.scene.remove(this.world.group); disposeWorld(this.world); }
+    this.bloom?.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
