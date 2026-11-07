@@ -17,7 +17,7 @@ const vec = (o, d) => {
 const clampScale = (v) => Math.min(10, Math.max(0.05, v));
 
 /** 全アクセサリー共通の位置オフセット(stud)。[X(+右/-左), Y(+上), Z(+後ろ/-前)]。通常のヘアには適用しない。 */
-export const GLOBAL_ACCESSORY_POS = [-0.1, 0, -0.2];
+export const GLOBAL_ACCESSORY_POS = [0, 0, -0.15];
 /** avatar API の assetType.id: Hair(通常のヘア)。調整の対象外 */
 export const HAIR_ASSET_TYPE_ID = 41;
 
