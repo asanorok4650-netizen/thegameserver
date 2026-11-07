@@ -1,5 +1,6 @@
 // Robloxメッシュ(version 1.xx テキスト / 2.00 / 3.xx / 4.xx / 5.00 / 6.00 チャンク形式 / 7.00 Draco圧縮)のパーサ。THREE非依存。
 // v7.00 は Draco のデコードが非同期なので parseMeshAsync を使う(parseMesh は v1〜v6)。スキニング/FACSは読み飛ばす。返り値のUVは「v=0が画像の上」のまま(テクスチャはflipY=falseで使う)。
+// v1.xx テキストだけはUVのVが下原点で保存されているため、読み込み時に 1-v へ直して他の版と揃える。
 
 export class MeshError extends Error {}
 
@@ -27,7 +28,7 @@ function parseV1(u8, ver) {
   for (let i = 0; i < nv; i++) {
     const [p, n, t] = [triples[3 * i], triples[3 * i + 1], triples[3 * i + 2]];
     for (let k = 0; k < 3; k++) { positions[i * 3 + k] = p[k] * scale; normals[i * 3 + k] = n[k]; }
-    uvs[i * 2] = t[0]; uvs[i * 2 + 1] = t[1];
+    uvs[i * 2] = t[0]; uvs[i * 2 + 1] = 1 - t[1]; // v1はVが下原点 → 他の版(v=0が画像の上)に合わせる
   }
   const indices = new Uint32Array(nv);
   for (let i = 0; i < nv; i++) indices[i] = i;
