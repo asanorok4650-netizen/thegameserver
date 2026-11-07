@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Game } from '../game/engine.js';
+import { GraphicsGame } from '../game/graphics-game.js';
+import { loadSettings } from '../game/quality.js';
 import { fetchServerFile, loadWorldPackage } from '../game/loader.js';
 import { buildSceneFromWorld } from '../game/world.js';
 import { buildAvatar } from '../avatar/builder.js';
@@ -7,6 +8,7 @@ import { serverFileUrl } from '../servers/api.js';
 import { CONFIG } from '../config.js';
 import { createRoom, getRoomInfo, NetSession } from '../net/session.js';
 import { ROOM_CODE_RE } from '../net/protocol.js';
+import GameMenu, { StatsOverlay } from './GameMenu.jsx';
 import '../net.css';
 
 const JOY_R = 55;
@@ -35,12 +37,16 @@ export default function GameView({ server, desc, playerName, onExit }) {
   const [completed, setCompleted] = useState(false);
   const [ruleMessage, setRuleMessage] = useState('');
   const [ruleScore, setRuleScore] = useState(0);
+  const [showMenu, setShowMenu] = useState(false);
+  const [gfx, setGfx] = useState(() => loadSettings()); // 描画品質など(Game側と同じ保存値)
+  const [stats, setStats] = useState(null);
 
   useEffect(() => {
     let dead = false;
     const ac = new AbortController();
-    const game = new Game(hostRef.current);
+    const game = new GraphicsGame(hostRef.current);
     gameRef.current = game;
+    game.gfx.onStats = setStats;
     setCompleted(false);
     setRuleMessage(''); setRuleScore(0);
     const log = (kind, text) => { if (!dead) setLines((l) => [...l.slice(-80), { kind, text }]); };
@@ -168,6 +174,31 @@ export default function GameView({ server, desc, playerName, onExit }) {
     setNetRoom(null); setNetPlayers([]); setNetMsg('');
   }
 
+  // ── ゲーム内メニュー ──
+  function openMenu() {
+    const game = gameRef.current;
+    if (game) { game.setInputLocked(true); game.setMove(0, 0); game.setJump(false); }
+    // 触っていたスティック・視点操作は離した扱いにする(メニューが上に重なるため)
+    joy.current.id = null; look.current.id = null;
+    if (baseRef.current) baseRef.current.style.display = 'none';
+    setShowMenu(true);
+  }
+  function closeMenu() {
+    gameRef.current?.setInputLocked(false);
+    setShowMenu(false);
+  }
+  function changeGfx(patch) {
+    const game = gameRef.current;
+    if (!game) return;
+    const s = game.gfx.set(patch);
+    setGfx(s);
+    if (!s.showStats) setStats(null);
+  }
+  function respawnFromMenu() {
+    gameRef.current?.respawn();
+    closeMenu();
+  }
+
   function joyDown(e) {
     if (joy.current.id !== null) return;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -225,7 +256,13 @@ export default function GameView({ server, desc, playerName, onExit }) {
         </div>
       )}
       {phase === 'playing' && (ruleMessage || ruleScore !== 0) && <div className="game-rule-hud">{ruleMessage && <div className="game-rule-message">{ruleMessage}</div>}{ruleScore !== 0 && <div className="game-rule-score">スコア {ruleScore}</div>}</div>}
+      {phase === 'playing' && gfx.showStats && <StatsOverlay stats={stats} />}
       <div className="game-topbar">
+        {phase === 'playing' && (
+          <button className="game-menu-btn" onClick={openMenu} aria-label="メニューを開く">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
+          </button>
+        )}
         <button className="game-chip" onClick={onExit}>← 退出</button>
         <span className="game-title">{server.name}</span>
         <button className="game-chip" onClick={() => setShowNet((v) => !v)}>{netRoom ? `マルチ ${netPlayers.length}人` : 'マルチ'}</button>
@@ -271,6 +308,9 @@ export default function GameView({ server, desc, playerName, onExit }) {
           {phase === 'loading' && <div className="log-info">読み込み中…</div>}
           {phase === 'error' && <button className="secondary-button" onClick={onExit}>ホームに戻る</button>}
         </div>
+      )}
+      {showMenu && phase === 'playing' && (
+        <GameMenu settings={gfx} onChange={changeGfx} onResume={closeMenu} onRespawn={respawnFromMenu} onExit={onExit} canRespawn={!completed} />
       )}
     </div>
   );
