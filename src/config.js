@@ -28,6 +28,9 @@ export const CONFIG = {
   // 描画解像度の上限(スマホ向けに設定画面から変更可能)
   get pixelRatioCap() { return Number(lsGet('rbxl.pixelRatioCap', '2')) || 2; },
   set pixelRatioCap(v) { lsSet('rbxl.pixelRatioCap', String(v)); },
+  // Bloom(UnrealBloomPass)。既定はON。ゲームを開き直したときから反映される
+  get bloom() { return lsGet('rbxl.bloom', '1') !== '0'; },
+  set bloom(v) { lsSet('rbxl.bloom', v ? '1' : '0'); },
   get lastUser() { return lsGet('rbxl.lastUser', ''); },
   set lastUser(v) { lsSet('rbxl.lastUser', String(v || '')); },
 };
