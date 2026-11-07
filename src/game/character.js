@@ -1,8 +1,11 @@
 // 歩行アニメーション(手続き式)。腕・脚を肩・腰を支点に振る。
-// R15: 関節の入れ子(skeleton.js)に組み替えて、肩・腰の関節を回す。組み替えに失敗したら従来のピボット方式にする。
+// R15: 関節の入れ子(skeleton.js)に組み替え、標準のKeyframeSequenceを関節に流し込む。
+//      アニメが読み込めない状態は、肩・腰の関節を回す手続き式で代用。組み替えに失敗したら従来のピボット方式にする。
 // R6 : 腕・脚のメッシュをピボットにまとめて振る。
 import * as THREE from 'three';
 import { attachRig } from '../avatar/skeleton.js';
+import { createAnimate } from './animate.js';
+import { posesToCFs } from '../rbx/animation.js';
 
 const key = (n) => String(n).toLowerCase().replace(/[^a-z]/g, '');
 const LIMBS = {
@@ -37,9 +40,17 @@ export function makeAnimator(built) {
   if (sk) {
     const found = Object.keys(R15_ROOTS).filter((k) => sk.nodes[R15_ROOTS[k]]);
     const gait = makeGait();
+    const ctl = createAnimate();
+    const posScale = (built.scales && built.scales.height) || 1;
+    let usedClip = false;
+    // 標準アニメーション(KeyframeSequence)を読み込む。読み込めるまで/読めない状態は手続き式の振りで代用
+    import('../avatar/animations.js').then((m) => m.loadDefaultAnimations(ctl)).catch((e) => console.info('[anim] 読み込み処理に失敗', e.message));
     return {
-      found,
+      found, anim: ctl,
       update(dt, speed, grounded) {
+        const poses = ctl.update(dt, speed, grounded);
+        if (poses) { sk.setPose(posesToCFs(poses, posScale)); usedClip = true; return; }
+        if (usedClip) { sk.resetPose(); usedClip = false; }
         const a = gait(dt, speed, grounded);
         for (const k of found) sk.swing(R15_ROOTS[k], a[k]);
       }
