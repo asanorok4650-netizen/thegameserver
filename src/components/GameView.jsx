@@ -258,12 +258,14 @@ export default function GameView({ server, desc, playerName, onExit }) {
       {phase === 'playing' && (ruleMessage || ruleScore !== 0) && <div className="game-rule-hud">{ruleMessage && <div className="game-rule-message">{ruleMessage}</div>}{ruleScore !== 0 && <div className="game-rule-score">スコア {ruleScore}</div>}</div>}
       {phase === 'playing' && gfx.showStats && <StatsOverlay stats={stats} />}
       <div className="game-topbar">
-        {phase === 'playing' && (
+        {phase === 'playing' ? (
           <button className="game-menu-btn" onClick={openMenu} aria-label="メニューを開く">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
           </button>
+        ) : (
+          // 読み込み中・エラー時はメニューがまだ使えないので、ここから退出できるようにする
+          <button className="game-chip" onClick={onExit}>← 退出</button>
         )}
-        <button className="game-chip" onClick={onExit}>← 退出</button>
         <span className="game-title">{server.name}</span>
         <button className="game-chip" onClick={() => setShowNet((v) => !v)}>{netRoom ? `マルチ ${netPlayers.length}人` : 'マルチ'}</button>
         <button className="game-chip" onClick={() => setShowLog((v) => !v)}>ログ</button>

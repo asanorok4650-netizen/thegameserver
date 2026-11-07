@@ -24,9 +24,11 @@ export class GraphicsGame extends Game {
   tick() {
     const g = this.gfx;
     if (!g) { super.tick(); return; }
-    if (!g.shouldRender(performance.now())) return; // フレーム上限: 間引いたフレームの時間は次のdtに含まれる
+    const t0 = performance.now();
+    if (!g.shouldRender(t0)) return; // フレーム上限: 間引いたフレームの時間は次のdtに含まれる
     super.tick();
-    g.endFrame(performance.now());
+    const t1 = performance.now();
+    g.endFrame(t1, t1 - t0); // t1 - t0 = このフレームの更新+描画命令のCPU時間(GPUの待ちは含まない)
   }
 
   setAvatar(built) {

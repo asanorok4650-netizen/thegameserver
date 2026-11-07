@@ -96,6 +96,7 @@ export function StatsOverlay({ stats }) {
   return (
     <div className="gm-stats" aria-hidden="true">
       <div>{stats.fps} FPS ({stats.ms.toFixed(1)} ms)</div>
+      <div>CPU {stats.cpu.toFixed(1)} ms / フレーム</div>
       <div>描画 {k(stats.calls)} コール / {k(stats.triangles)} 三角形</div>
       <div>形状 {k(stats.geometries)} / テクスチャ {k(stats.textures)}</div>
       <div>解像度 ×{stats.ratio} ({stats.width}×{stats.height})</div>
