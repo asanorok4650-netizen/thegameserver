@@ -1,6 +1,6 @@
 // カスタムのボディパーツ(メッシュ)を、リグのレイアウトへ組み込む。THREE非依存。
 // R6 : 位置は標準のまま、パーツの見た目(メッシュ)だけ差し替える。
-// R15: Roblox本家と同じく「RigAttachment同士を一致させる」方式で、関節ごとに位置・回転を決める。
+// R15: Roblox本家と同じ「RigAttachment同士を一致させる」方式で、関節ごとに位置・回転を決める。
 //      カスタムでないパーツ(標準の箱)側のアタッチメントは、標準レイアウトの関節位置から近似する。
 import { R6_NAMES } from '../rbx/bodypart.js';
 
@@ -10,7 +10,7 @@ const mm = (A, B) => { const o = []; for (let i = 0; i < 3; i++) for (let j = 0;
 const tr = (R) => [R[0], R[3], R[6], R[1], R[4], R[7], R[2], R[5], R[8]];
 
 // [親, 子, 関節名] 親が先に並ぶこと。アタッチメント名は `${関節名}RigAttachment`
-const JOINTS = [
+export const JOINTS = [
   ['LowerTorso', 'UpperTorso', 'Waist'], ['UpperTorso', 'Head', 'Neck'],
   ['UpperTorso', 'LeftUpperArm', 'LeftShoulder'], ['LeftUpperArm', 'LeftLowerArm', 'LeftElbow'], ['LeftLowerArm', 'LeftHand', 'LeftWrist'],
   ['UpperTorso', 'RightUpperArm', 'RightShoulder'], ['RightUpperArm', 'RightLowerArm', 'RightElbow'], ['RightLowerArm', 'RightHand', 'RightWrist'],
@@ -19,7 +19,7 @@ const JOINTS = [
 ];
 
 /** 標準レイアウト(base)上の関節のワールド位置(近似)。 */
-function defaultJoint(joint, P, C, h) {
+export function defaultJoint(joint, P, C, h) {
   if (/Shoulder$/.test(joint)) { // 腕の内側の縁、上端から少し下
     const sg = C.center[0] < 0 ? -1 : 1;
     return [C.center[0] - sg * C.size[0] / 2, C.center[1] + C.size[1] / 2 - 0.18 * h, 0];
