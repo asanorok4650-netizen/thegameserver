@@ -8,6 +8,7 @@ import { parseMeshAsync } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
 import { extractBodyPart, describeTree } from '../rbx/bodypart.js';
 import { primitiveGeometry, isPrimitiveType } from '../rbx/primitives.js';
+import { readAdjust, applyAdjust, describeAdjust } from './adjust.js';
 
 export class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -231,6 +232,7 @@ export async function buildDescriptor(av, onProgress = () => {}) {
     if (!slot && !isAcc && !bodySlot) continue;
     jobs.push((async () => {
       try {
+        let adjNote = '';
         if (bodySlot) {
           const bp = await loadBodyPart(a.id, rigType, bodySlot);
           desc.bodyParts[bodySlot] = bp;
@@ -240,12 +242,14 @@ export async function buildDescriptor(av, onProgress = () => {}) {
         if (isAcc) {
           const acc = await loadAccessory(a.id);
           acc.name = a.name;
+          const adj = readAdjust(a.meta); // ユーザーが設定した位置・回転・サイズの調整(avatar API の meta)
+          if (adj) { applyAdjust(acc, adj); acc.adjust = adj; adjNote = ` 調整: ${describeAdjust(adj)}`; }
           desc.accessories.push(acc);
         } else {
           const img = await textureForAsset(a.id);
           if (slot === 'face') desc.face = img; else desc.clothing[slot] = img;
         }
-        entry.status = 'ok'; entry.note = '適用済み';
+        entry.status = 'ok'; entry.note = `適用済み${adjNote}`;
       } catch (e) {
         entry.status = 'error'; entry.note = e.message;
       } finally {
