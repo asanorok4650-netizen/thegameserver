@@ -224,7 +224,11 @@ function buildAccessoryMesh(acc, rigType, layout) {
   geo.setIndex(new THREE.BufferAttribute(new Uint32Array(g.indices), 1));
 
   let map = null;
-  if (acc.texture) { map = new THREE.Texture(acc.texture); map.flipY = false; map.colorSpace = THREE.SRGBColorSpace; map.needsUpdate = true; }
+  if (acc.texture) {
+    map = new THREE.Texture(acc.texture); map.flipY = false; map.colorSpace = THREE.SRGBColorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping; // RobloxはUVが0〜1の外でもテクスチャを繰り返す(Clampだと縁の色が引き伸ばされてズレて見える)
+    map.needsUpdate = true;
+  }
   const c = h.color;
   const mat = new THREE.MeshStandardMaterial({ map, roughness: 0.8, side: THREE.DoubleSide,
     color: map || !c ? 0xffffff : new THREE.Color(c[0], c[1], c[2]),
