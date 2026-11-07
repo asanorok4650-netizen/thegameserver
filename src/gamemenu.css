@@ -1,0 +1,42 @@
+/* ゲーム中のメニュー(Roblox風): 暗いパネル・上のタブ・「ラベル | 操作」の行・下の3ボタン */
+.game-menu-btn{display:grid;place-items:center;width:42px;height:42px;padding:0;border:0;border-radius:50%;background:#0d0d10e6;color:#fff;cursor:pointer;flex:none}
+.game-menu-btn:active{background:#2a2b30}
+
+.gm-overlay{position:absolute;inset:0;z-index:20;display:grid;place-items:center;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left));background:#000000a6;pointer-events:auto;touch-action:none}
+.gm-panel{display:flex;flex-direction:column;width:min(94vw,760px);max-height:min(100%,760px);border-radius:16px;background:#1f2023f2;color:#fff;box-shadow:0 12px 48px #0008;overflow:hidden}
+
+.gm-tabs{display:flex;padding:0 14px;border-bottom:1px solid #ffffff2e;flex:none}
+.gm-tab{display:flex;align-items:center;justify-content:center;gap:10px;min-width:150px;padding:20px 18px 16px;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;background:none;color:#ffffff99;font:600 17px inherit;cursor:pointer}
+.gm-tab.active{color:#fff;border-bottom-color:#fff}
+
+.gm-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;touch-action:pan-y;padding:6px 26px 10px}
+.gm-section{margin:26px 0 8px;font-size:24px;font-weight:800;letter-spacing:.02em}
+.gm-section:first-child{margin-top:20px}
+.gm-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);align-items:center;gap:14px;padding:14px 0}
+.gm-row+.gm-row{border-top:1px solid #ffffff14}
+.gm-label{font-size:17px;font-weight:600}
+.gm-desc{margin-top:6px;color:#ffffff8c;font-size:13px;font-weight:400;line-height:1.5}
+.gm-control{min-width:0}
+
+.gm-select{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.gm-arrow{display:grid;place-items:center;width:48px;height:48px;padding:0;border:0;border-radius:12px;background:none;color:#fff;cursor:pointer;flex:none}
+.gm-arrow:active{background:#ffffff1f}
+.gm-value{flex:1;text-align:center;font-size:17px;font-weight:600}
+
+.gm-footer{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:14px 20px 20px;flex:none}
+.gm-btn{min-height:54px;padding:0 12px;border:0;border-radius:12px;background:#2b2c31;color:#fff;font:700 17px inherit;cursor:pointer}
+.gm-btn:active{filter:brightness(1.25)}
+.gm-btn:disabled{opacity:.4;cursor:default}
+.gm-btn.primary{background:#1b3190}
+
+/* 統計情報(左上、上のボタンの下) */
+.gm-stats{position:absolute;z-index:9;top:64px;left:12px;padding:7px 10px;border-radius:8px;background:#000000a6;color:#e8ffe8;font:600 11px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre;pointer-events:none}
+
+@media (max-width:560px){
+  .gm-row{grid-template-columns:1fr;gap:4px}
+  .gm-body{padding:4px 18px 8px}
+  .gm-section{font-size:21px}
+  .gm-tab{min-width:0;flex:1}
+  .gm-footer{gap:10px;padding:12px 14px 16px}
+  .gm-btn{font-size:15px}
+}
