@@ -36,7 +36,7 @@ export function eulerXYZ(rx, ry, rz) {
 /** assets[].meta → { pos, rot(度), scale }。調整が無い(または単位値)なら null。 */
 export function readAdjust(meta) {
   if (!meta || typeof meta !== 'object') return null;
-  const pos = vec(meta.position, [-0.1, 0, -0.1]);
+  const pos = vec(meta.position, [0, 0, 0]);
   const rot = vec(meta.rotation, [0, 0, 0]);
   const scale = vec(meta.scale, [1, 1, 1]).map(clampScale);
   const none = pos.every((v) => v === 0) && rot.every((v) => v === 0) && scale.every((v) => v === 1);
