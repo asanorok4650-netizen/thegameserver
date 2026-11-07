@@ -8,7 +8,7 @@ import { parseMeshAsync } from '../rbx/mesh.js';
 import { extractAccessory, parseAssetUri } from '../rbx/accessory.js';
 import { extractBodyPart, describeTree } from '../rbx/bodypart.js';
 import { primitiveGeometry, isPrimitiveType } from '../rbx/primitives.js';
-import { readAdjust, applyAdjust, describeAdjust } from './adjust.js';
+import { adjustFor, applyAdjust, describeAdjust } from './adjust.js';
 
 export class ApiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
@@ -242,7 +242,8 @@ export async function buildDescriptor(av, onProgress = () => {}) {
         if (isAcc) {
           const acc = await loadAccessory(a.id);
           acc.name = a.name;
-          const adj = readAdjust(a.meta); // ユーザーが設定した位置・回転・サイズの調整(avatar API の meta)
+          // ユーザー調整(avatar API の meta)+全アクセサリー共通オフセット。通常のヘアは対象外(null)
+          const adj = adjustFor(a.meta, a.assetType && a.assetType.id);
           if (adj) { applyAdjust(acc, adj); acc.adjust = adj; adjNote = ` 調整: ${describeAdjust(adj)}`; }
           desc.accessories.push(acc);
         } else {

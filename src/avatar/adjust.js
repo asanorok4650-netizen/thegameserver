@@ -16,6 +16,11 @@ const vec = (o, d) => {
 };
 const clampScale = (v) => Math.min(10, Math.max(0.05, v));
 
+/** 全アクセサリー共通の位置オフセット(stud)。[X(+右/-左), Y(+上), Z(+後ろ/-前)]。通常のヘアには適用しない。 */
+export const GLOBAL_ACCESSORY_POS = [-0.1, 0, -0.2];
+/** avatar API の assetType.id: Hair(通常のヘア)。調整の対象外 */
+export const HAIR_ASSET_TYPE_ID = 41;
+
 const mul3 = (A, B) => [
   A[0] * B[0] + A[1] * B[3] + A[2] * B[6], A[0] * B[1] + A[1] * B[4] + A[2] * B[7], A[0] * B[2] + A[1] * B[5] + A[2] * B[8],
   A[3] * B[0] + A[4] * B[3] + A[5] * B[6], A[3] * B[1] + A[4] * B[4] + A[5] * B[7], A[3] * B[2] + A[4] * B[5] + A[5] * B[8],
@@ -41,6 +46,16 @@ export function readAdjust(meta) {
   const scale = vec(meta.scale, [1, 1, 1]).map(clampScale);
   const none = pos.every((v) => v === 0) && rot.every((v) => v === 0) && scale.every((v) => v === 1);
   return none ? null : { pos, rot, scale };
+}
+
+/**
+ * アセット1点ぶんの最終的な調整 = ユーザーの meta 調整 + 全アクセサリー共通オフセット。
+ * 通常のヘア(assetTypeId=41)は対象外(null)。
+ */
+export function adjustFor(meta, assetTypeId) {
+  if (assetTypeId === HAIR_ASSET_TYPE_ID) return null;
+  const a = readAdjust(meta) || { pos: [0, 0, 0], rot: [0, 0, 0], scale: [1, 1, 1] };
+  return { pos: a.pos.map((v, k) => v + GLOBAL_ACCESSORY_POS[k]), rot: a.rot, scale: a.scale };
 }
 
 /**
