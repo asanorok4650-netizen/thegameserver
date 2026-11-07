@@ -36,6 +36,7 @@ const DOWN_STEP = 0.1;
 const UP_STEP = 0.05;
 const WINDOW_MS = 500; // 統計と動的解像度の判定に使う計測の区切り
 const SETTLE_MS = 3000; // 読み込み直後は重いので、この間は解像度を動かさない
+const NO_DOWN_FIRST_MS = 60000; // 解像度を下げても速くならなかったとき、次に下げるまで待つ時間(繰り返すごとに2倍、上限10分)
 
 /** 解像度の決定・フレーム上限・動的解像度・統計(FPS/描画コール数など)をまとめて扱う */
 export class GraphicsController {
@@ -49,10 +50,16 @@ export class GraphicsController {
     this._lastRender = 0;
     this._lastFrame = 0;
     this._readyAt = Infinity;
-    this._upNeed = 10; // 解像度を戻すまでに必要な「良い」計測の回数(上げてすぐ落ちたら延ばす)
     this._lastUpAt = 0;
-    this._bad = 0; this._good = 0;
+    this._resetAdapt();
     this._resetWindow(0);
+  }
+
+  _resetAdapt() {
+    this._upNeed = 10; // 解像度を戻すまでに必要な「良い」計測の回数(上げてすぐ落ちたら延ばす)
+    this._bad = 0; this._good = 0;
+    this._probe = null; // 解像度を下げた効果の確認中
+    this._noDownUntil = 0; this._noDownMs = NO_DOWN_FIRST_MS;
   }
 
   /** ワールドとキャラクターの配置が終わった。少し待ってから動的解像度を始める */
@@ -64,10 +71,10 @@ export class GraphicsController {
     this.settings = sanitize({ ...prev, ...patch });
     saveSettings(this.settings);
     if (this.settings.quality !== prev.quality) {
-      this.scale = 1; this._upNeed = 10; this._bad = 0; this._good = 0; this._resetWindow(0);
+      this.scale = 1; this._resetAdapt(); this._resetWindow(0);
       this.onResolutionChange?.();
     }
-    if (this.settings.fpsLimit !== prev.fpsLimit) { this._bad = 0; this._good = 0; this._resetWindow(0); }
+    if (this.settings.fpsLimit !== prev.fpsLimit) { this._resetAdapt(); this._resetWindow(0); }
     return this.settings;
   }
 
@@ -88,9 +95,9 @@ export class GraphicsController {
     return true;
   }
 
-  /** 1フレーム描画した直後に呼ぶ */
-  endFrame(now) {
-    if (this._lastFrame) { this._winMs += Math.min(now - this._lastFrame, 100); this._winFrames++; }
+  /** 1フレーム描画した直後に呼ぶ。cpuMs はそのフレームの更新+描画命令にかかった時間 */
+  endFrame(now, cpuMs = 0) {
+    if (this._lastFrame) { this._winMs += Math.min(now - this._lastFrame, 100); this._winFrames++; this._winCpu += cpuMs; }
     this._lastFrame = now;
     if (!this._winStart) { this._winStart = now; return; }
     const elapsed = now - this._winStart;
@@ -101,6 +108,7 @@ export class GraphicsController {
     this.stats = {
       fps: Math.round((this._winFrames * 1000) / this._winMs),
       ms: avg,
+      cpu: this._winCpu / this._winFrames,
       calls: info.render.calls,
       triangles: info.render.triangles,
       geometries: info.memory.geometries,
@@ -114,16 +122,34 @@ export class GraphicsController {
     this._resetWindow(now);
   }
 
-  _resetWindow(now) { this._winStart = now; this._winMs = 0; this._winFrames = 0; }
+  _resetWindow(now) { this._winStart = now; this._winMs = 0; this._winFrames = 0; this._winCpu = 0; }
 
   _adapt(avg, now) {
+    const p = this._probe;
+    if (p) { // 解像度を下げた直後: 本当に速くなったかを確かめる(最初の2回は切り替えの影響があるので見ない)
+      if (--p.skip >= 0) return;
+      p.sum += avg; p.n++;
+      if (p.n < 2) return;
+      this._probe = null;
+      if (p.sum / p.n > p.before * 0.9) {
+        // 速くならなかった: 原因は解像度ではない(OSの30FPS制限・CPU負荷など)。元に戻して、しばらく下げない
+        this.scale = p.prev;
+        this._noDownUntil = now + this._noDownMs;
+        this._noDownMs = Math.min(600000, this._noDownMs * 2);
+        this.onResolutionChange?.();
+      }
+      return;
+    }
     const target = 1000 / (this.settings.fpsLimit || 60);
     if (avg > target * 1.15) { // 目標より遅い状態が1秒(2回)続いたら、解像度を下げる
       this._good = 0;
+      if (now < this._noDownUntil) return;
       if (++this._bad >= 2 && this.scale > MIN_SCALE) {
         if (now - this._lastUpAt < 10000) this._upNeed = Math.min(120, this._upNeed * 2); // 上げてすぐ落ちた: 次に上げるまでを延ばす
-        this.scale = Math.max(MIN_SCALE, +(this.scale - DOWN_STEP).toFixed(2));
+        const prev = this.scale;
+        this.scale = Math.max(MIN_SCALE, +(prev - DOWN_STEP).toFixed(2));
         this._bad = 0;
+        this._probe = { prev, before: avg, skip: 2, sum: 0, n: 0 };
         this.onResolutionChange?.();
       }
       return;
