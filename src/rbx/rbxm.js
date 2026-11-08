@@ -24,6 +24,7 @@ class Cur {
   u32() { const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
   rawF32() { const v = this.dv.getFloat32(this.p, true); this.p += 4; return v; }
   str() { const n = this.u32(); const s = utf8.decode(this.u8.subarray(this.p, this.p + n)); this.p += n; return s; }
+  bytes() { const n = this.u32(); const b = this.u8.slice(this.p, this.p + n); this.p += n; return b; }
   // バイト並べ替え(インターリーブ)された32bit値
   u32s(n) {
     const out = new Uint32Array(n), u = this.u8, b = this.p;
@@ -59,7 +60,11 @@ export function isBinaryRbxm(buf) {
 function readProp(cur, type, n, warnings, label) {
   const out = new Array(n);
   switch (type) {
-    case 0x01: case 0x1d: for (let i = 0; i < n; i++) out[i] = cur.str(); return out; // String / Bytecode
+    case 0x01: case 0x1d: { // String / Bytecode。カーブのキー(ValuesAndTimes)はバイナリなので、UTF-8に通さずバイト列で持つ
+      const raw = /\.ValuesAndTimes$/.test(label);
+      for (let i = 0; i < n; i++) out[i] = raw ? cur.bytes() : cur.str();
+      return out;
+    }
     case 0x02: for (let i = 0; i < n; i++) out[i] = cur.byte() !== 0; return out;
     case 0x03: return Array.from(cur.i32s(n));
     case 0x04: return Array.from(cur.f32s(n));

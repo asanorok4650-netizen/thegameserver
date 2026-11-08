@@ -2,7 +2,9 @@
 // Pose名 = 子パーツ名 = Motor6D(関節)名のキー。Poseの入れ子は無視して、パーツ名ごとの時系列に直す。
 // 補間: あるキーフレームのPoseのEasingStyle/Directionが、そのキーフレームから「次のキーフレーム」までの区間に効く(要・実アニメで検証)。
 //       Weight<=0 のPoseは使わない(HumanoidRootPartなど)。
+// カーブ形式(CurveAnimation)は curve-animation.js。samplePoses は kind==='curve' のときそちらへ回す。
 import { parseModel } from './model.js';
+import { parseCurveAnimation, sampleCurvePoses, slerp } from './curve-animation.js';
 
 const EASE_STYLES = ['Linear', 'Constant', 'Elastic', 'Cubic', 'Bounce', 'CubicV2'];
 const EASE_DIRS = ['In', 'Out', 'InOut'];
@@ -22,17 +24,6 @@ export function quatToRot([x, y, z, w]) {
   return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
     2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
     2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)];
-}
-function slerp(a, b, u) {
-  let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
-  let bb = b;
-  if (d < 0) { d = -d; bb = [-b[0], -b[1], -b[2], -b[3]]; }
-  let ka, kb;
-  if (d > 0.9995) { ka = 1 - u; kb = u; }
-  else { const th = Math.acos(d), s = Math.sin(th); ka = Math.sin((1 - u) * th) / s; kb = Math.sin(u * th) / s; }
-  const q = [ka * a[0] + kb * bb[0], ka * a[1] + kb * bb[1], ka * a[2] + kb * bb[2], ka * a[3] + kb * bb[3]];
-  const n = Math.hypot(...q) || 1;
-  return q.map((v) => v / n);
 }
 const lerp3 = (a, b, u) => [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
 
@@ -101,13 +92,14 @@ export function parseKeyframeSequence(tree) {
   };
 }
 
-/** アセットのバイト列(rbxm / rbxmx)からアニメーションを読む。CurveAnimation形式は未対応 */
+/** アセットのバイト列(rbxm / rbxmx)からアニメーションを読む。KeyframeSequence と CurveAnimation(curve-animation.js)に対応 */
 export function parseAnimation(buf) {
   const tree = parseModel(buf);
   const anim = parseKeyframeSequence(tree);
   if (anim) return anim;
-  if ([...tree.instances.values()].some((i) => i.className === 'CurveAnimation')) throw new Error('CurveAnimation形式のアニメーションは未対応です');
-  throw new Error('KeyframeSequence が見つかりません');
+  const curve = parseCurveAnimation(tree);
+  if (curve) return curve;
+  throw new Error('KeyframeSequence / CurveAnimation が見つかりません');
 }
 
 // ---- 再生計算 ----
@@ -119,6 +111,7 @@ export function clipTime(anim, t) {
 
 /** @returns { パーツ名: { pos:[x,y,z], q:[x,y,z,w] } }(Pose名 = 子パーツ名) */
 export function samplePoses(anim, t) {
+  if (anim.kind === 'curve') return sampleCurvePoses(anim, t);
   const out = {};
   for (const [name, arr] of Object.entries(anim.tracks)) {
     if (t <= arr[0].t) { out[name] = { pos: arr[0].pos, q: arr[0].q }; continue; }
