@@ -5,7 +5,7 @@ import { clipTime, samplePoses, blendPoses } from '../rbx/animation.js';
  * update(dt, speed, grounded) → ポーズ集合 | null(今の状態のアニメーションが未読み込みのとき)
  * 歩行・ランの再生速度は speed / walkScale(Robloxの標準と同じ考え方)。
  */
-export function createAnimate({ fade = 0.15, walkScale = 16, jumpTime = 0.31, moveThreshold = 0.5, runSpeed = 14 } = {}) {
+export function createAnimate({ fade = 0.15, walkScale = 16, jumpTime = 0.31, moveThreshold = 0.5, runSpeed = 16.5 } = {}) {
   const clips = {};
   const t = {};
   let state = null, prev = null, fadeP = 1, airTime = 0, wasGrounded = true;
@@ -22,7 +22,7 @@ export function createAnimate({ fade = 0.15, walkScale = 16, jumpTime = 0.31, mo
         want = airTime < jumpTime ? 'jump' : 'fall';
       } else {
         airTime = 0;
-        want = speed > moveThreshold ? (speed >= runSpeed && clips.run ? 'run' : 'walk') : 'idle'; // ラン用のアニメがある(アバターのパック)ときだけ、速いときに使う
+        want = speed > moveThreshold ? (speed >= runSpeed && clips.run ? 'run' : 'walk') : 'idle'; // 標準のAnimateと同じく、通常速度(16)までは歩行、それより速いときだけラン(ラン用のアニメがあるときのみ)
       }
       wasGrounded = grounded;
       if (want !== state) { prev = state; state = want; t[state] = 0; fadeP = prev ? 0 : 1; }
