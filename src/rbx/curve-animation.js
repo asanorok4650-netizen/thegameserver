@@ -79,7 +79,7 @@ export function readRotationKeys(bytes) {
   return keys;
 }
 
-function toBytes(v) { // バイナリrk bxmはUint8Array、XMLはbase64文字列
+function toBytes(v) { // バイナリrbxmはUint8Array、XMLはbase64文字列
   if (v instanceof Uint8Array) return v;
   if (typeof v === 'string' && v.length) {
     try { return Uint8Array.from(atob(v.replace(/\s+/g, '')), (c) => c.charCodeAt(0)); } catch (e) { return null; }

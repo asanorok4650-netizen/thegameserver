@@ -125,7 +125,7 @@ function readProp(cur, type, n, warnings, label) {
  */
 export function parseRbxm(input) {
   const u8 = input instanceof Uint8Array ? input : new Uint8Array(input);
-  if (!isBinaryRbxm(u8)) throw new Error('バイナリrk bxm形式ではありません');
+  if (!isBinaryRbxm(u8)) throw new Error('バイナリrbxm形式ではありません');
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
   const classes = new Map(); // classId -> { name, refs }
   const instances = new Map();
