@@ -377,7 +377,7 @@ export function buildAvatar(desc) {
     }
   }
   const box = new THREE.Box3().setFromObject(group);
-  return { group, parts, box, rigType: desc.rigType, diag, layout, scales: desc.scales || {} };
+  return { group, parts, box, rigType: desc.rigType, diag, layout, scales: desc.scales || {}, report: desc.report || [] };
 }
 
 export function disposeObject(root) {
