@@ -138,6 +138,16 @@ export function createScriptingRuntime(program, api = {}) {
           if (!accepted) warnOnce('プレイヤーにダメージを適用できません: ' + String(step.player).slice(0, 100));
           yield 0; break;
         }
+        case 'playerAnimation': {
+          const name = String(step.animation || '').slice(0, 100);
+          const target = who(step.player, context);
+          const speed = Math.max(0.05, Math.min(10, Number(read(step.speed, context)) || 1));
+          const accepted = step.action === 'stop'
+            ? api.stopAnimation?.(target, name)
+            : api.playAnimation?.(target, name, { speed, loop: step.loop === 'loop' ? true : step.loop === 'once' ? false : undefined });
+          if (!accepted) warnOnce('アニメーションを' + (step.action === 'stop' ? '止め' : '再生し') + 'られません: ' + name + '(名前・対象プレイヤー・R15アバターを確認してください)');
+          yield 0; break;
+        }
         case 'playerHeal': {
           const accepted = api.healPlayer?.(who(step.player, context), Math.max(0, Number(read(step.amount, context)) || 0));
           if (!accepted) warnOnce('プレイヤーを回復できません: ' + String(step.player).slice(0, 100));
