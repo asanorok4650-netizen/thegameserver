@@ -24,6 +24,7 @@ class Cur {
   u32() { const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
   rawF32() { const v = this.dv.getFloat32(this.p, true); this.p += 4; return v; }
   str() { const n = this.u32(); const s = utf8.decode(this.u8.subarray(this.p, this.p + n)); this.p += n; return s; }
+  bytes() { const n = this.u32(); const b = this.u8.slice(this.p, this.p + n); this.p += n; return b; }
   // バイト並べ替え(インターリーブ)された32bit値
   u32s(n) {
     const out = new Uint32Array(n), u = this.u8, b = this.p;
@@ -59,7 +60,11 @@ export function isBinaryRbxm(buf) {
 function readProp(cur, type, n, warnings, label) {
   const out = new Array(n);
   switch (type) {
-    case 0x01: case 0x1d: for (let i = 0; i < n; i++) out[i] = cur.str(); return out; // String / Bytecode
+    case 0x01: case 0x1d: { // String / Bytecode。カーブのキー(ValuesAndTimes)はバイナリなので、UTF-8に通さずバイト列で持つ
+      const raw = /\.ValuesAndTimes$/.test(label);
+      for (let i = 0; i < n; i++) out[i] = raw ? cur.bytes() : cur.str();
+      return out;
+    }
     case 0x02: for (let i = 0; i < n; i++) out[i] = cur.byte() !== 0; return out;
     case 0x03: return Array.from(cur.i32s(n));
     case 0x04: return Array.from(cur.f32s(n));
@@ -120,60 +125,5 @@ function readProp(cur, type, n, warnings, label) {
  */
 export function parseRbxm(input) {
   const u8 = input instanceof Uint8Array ? input : new Uint8Array(input);
-  if (!isBinaryRbxm(u8)) throw new Error('バイナリrbxm形式ではありません');
-  const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-  const classes = new Map(); // classId -> { name, refs }
-  const instances = new Map();
-  const warnings = [];
-  let p = 32;
-
-  while (p + 16 <= u8.length) {
-    const tag = String.fromCharCode(u8[p], u8[p + 1], u8[p + 2], u8[p + 3]);
-    const compLen = dv.getUint32(p + 4, true), rawLen = dv.getUint32(p + 8, true);
-    p += 16;
-    let data;
-    if (compLen === 0) { data = u8.subarray(p, p + rawLen); p += rawLen; }
-    else {
-      const comp = u8.subarray(p, p + compLen); p += compLen;
-      if (comp[0] === 0x28 && comp[1] === 0xb5 && comp[2] === 0x2f && comp[3] === 0xfd) {
-        throw new Error('ZSTD圧縮のrbxmは未対応です');
-      }
-      data = lz4Decompress(comp, rawLen);
-    }
-    if (tag === 'END\0') break;
-    const cur = new Cur(data);
-
-    if (tag === 'INST') {
-      const id = cur.u32(), name = cur.str(), hasService = cur.byte(), count = cur.u32();
-      const refs = cur.refs(count);
-      const cls = { name, refs: Array.from(refs) };
-      classes.set(id, cls);
-      for (const r of cls.refs) instances.set(r, { ref: r, className: name, props: {}, children: [], parent: null });
-      void hasService;
-    } else if (tag === 'PROP') {
-      const id = cur.u32(), propName = cur.str(), type = cur.byte();
-      const cls = classes.get(id);
-      if (!cls) { warnings.push(`PROP: 未知のクラスID ${id}`); continue; }
-      let vals;
-      try { vals = readProp(cur, type, cls.refs.length, warnings, `${cls.name}.${propName}`); }
-      catch (e) { warnings.push(`${cls.name}.${propName}: ${e.message}`); continue; }
-      if (vals) for (let i = 0; i < cls.refs.length; i++) instances.get(cls.refs[i]).props[propName] = vals[i];
-    } else if (tag === 'PRNT') {
-      cur.byte();
-      const count = cur.u32();
-      const kids = cur.refs(count), pars = cur.refs(count);
-      for (let i = 0; i < count; i++) {
-        const c = instances.get(kids[i]);
-        if (!c) continue;
-        const par = pars[i] === -1 ? null : instances.get(pars[i]) || null;
-        c.parent = par;
-        if (par) par.children.push(c);
-      }
-    }
-    // META / SSTR は今のところ不要
-  }
-  const roots = [...instances.values()].filter((i) => !i.parent);
-  return { instances, roots, warnings };
+  if (!isBinaryRbxm(u8)) throw new Error('バイナリrk bxm形式ではありません');
 }
-
-export const nameOf = (inst) => (inst.props.Name !== undefined ? inst.props.Name : inst.className);
