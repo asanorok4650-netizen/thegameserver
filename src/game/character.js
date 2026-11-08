@@ -43,8 +43,8 @@ export function makeAnimator(built) {
     const ctl = createAnimate();
     const posScale = (built.scales && built.scales.height) || 1;
     let usedClip = false;
-    // 標準アニメーション(KeyframeSequence)を読み込む。読み込めるまで/読めない状態は手続き式の振りで代用
-    import('../avatar/animations.js').then((m) => m.loadDefaultAnimations(ctl)).catch((e) => console.info('[anim] 読み込み処理に失敗', e.message));
+    // アバターのアニメーションパック(歩行・ラン・ジャンプ…)→標準アニメの順に読み込む。読み込めるまで/読めない状態は手続き式の振りで代用
+    import('../avatar/animations.js').then((m) => m.loadAvatarAnimations(ctl, built.report)).catch((e) => console.info('[anim] 読み込み処理に失敗', e.message));
     return {
       found, anim: ctl,
       update(dt, speed, grounded) {
