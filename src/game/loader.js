@@ -3,6 +3,10 @@ import { parseRbxm, isBinaryRbxm } from '../rbx/rbxm.js';
 import { treeToWorldJson } from '../tgw/worldjson.js';
 import { hasZipMagic } from '../tgw/validate.js';
 import { resolveLogicConfig } from '../logics/index.js';
+import { extractPlaceAnimations, sanitizeAnimations } from '../rbx/place-animations.js';
+import { setPlaceAnimations } from './anim-registry.js';
+
+const animInfo = (a) => (a.clips.length || a.refs.length ? ` / アニメーション ${a.clips.length + a.refs.length}件(${[...a.clips, ...a.refs].slice(0, 6).map((x) => x.name).join(', ')}${a.clips.length + a.refs.length > 6 ? ' ほか' : ''})` : '');
 
 /** 進捗つきでダウンロード。total はサーバー一覧のサイズ(Content-Lengthは使えないため) */
 export async function fetchServerFile(url, total, onProgress, signal) {
@@ -51,13 +55,21 @@ export async function loadWorldPackage(bytes, log = () => {}) {
     const { readTgw } = await import('../tgw/container.js'); // fflate は .tgw のときだけ読み込む
     const { manifest, worldJson } = readTgw(bytes);
     const src = manifest.source || {};
+    const animations = sanitizeAnimations(manifest.scripting?.animations);
+    setPlaceAnimations(animations);
     return {
-      format, worldJson, manifest, logic: resolveLogicConfig(manifest.logic), eventRules: manifest.eventRules || [], scripting: manifest.scripting?.workspace || null, warnings: [],
+      format, worldJson, manifest, logic: resolveLogicConfig(manifest.logic), eventRules: manifest.eventRules || [], scripting: manifest.scripting?.workspace || null, warnings: [], animations,
       report: { approx: src.approx || {}, ignored: src.ignored || {}, spawnFound: (worldJson.spawns || []).length > 0 },
-      info: `.tgw「${manifest.name}」 パーツ ${worldJson.parts.length}個`
+      info: `.tgw「${manifest.name}」 パーツ ${worldJson.parts.length}個${animInfo(animations)}`
     };
   }
   const tree = parseRbxl(bytes);
   const { worldJson, report } = treeToWorldJson(tree, log);
-  return { format, worldJson, manifest: null, logic: resolveLogicConfig(null), eventRules: [], scripting: null, report, warnings: tree.warnings, info: `rbxl インスタンス ${tree.instances.size}個` };
+  const { skipped, ...animations } = extractPlaceAnimations(tree);
+  setPlaceAnimations(animations);
+  const warnings = [...tree.warnings, ...skipped.map((s) => 'アニメーションを取り出せません: ' + s)];
+  // 取り出したアニメは、StudioでこのrbxlをTGWにするときの下書き(manifest.scripting.animations)として持たせる
+  const hasAnim = animations.clips.length || animations.refs.length;
+  const draft = hasAnim ? { scripting: { version: 1, workspace: null, animations } } : null;
+  return { format, worldJson, manifest: draft, logic: resolveLogicConfig(null), eventRules: [], scripting: null, report, warnings, animations, info: `rbxl インスタンス ${tree.instances.size}個${animInfo(animations)}` };
 }
