@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { attachRig } from '../avatar/skeleton.js';
 import { createAnimate } from './animate.js';
 import { posesToCFs } from '../rbx/animation.js';
+import { hasPlaceAnimation, getPlaceAnimation, placeAnimationNames } from './anim-registry.js';
 
 const key = (n) => String(n).toLowerCase().replace(/[^a-z]/g, '');
 const LIMBS = {
@@ -64,6 +65,15 @@ export function makeAnimator(built) {
     import('../avatar/animations.js').then((m) => m.loadAvatarAnimations(ctl, built.report, undefined, log)).catch((e) => log(`読み込み処理に失敗 - ${e.message}`));
     return {
       found, anim: ctl,
+      /** スクリプトから呼ぶ。名前はワールドのアニメ一覧(anim-registry)。取得はこの後に非同期で行う。名前が無ければ false */
+      playClip(name, opts = {}) {
+        if (!hasPlaceAnimation(name)) { log(`アニメーション「${name}」はありません。ある名前: ${placeAnimationNames().join(', ') || 'なし'}`); return false; }
+        getPlaceAnimation(name)
+          .then((anim) => { if (anim) ctl.playAction(name, anim, opts); })
+          .catch((e) => log(`アニメーション「${name}」の読み込みに失敗 - ${e.message}`));
+        return true;
+      },
+      stopClip(name = '') { ctl.stopAction(name); return true; },
       update(dt, speed, grounded) {
         const poses = ctl.update(dt, speed, grounded);
         if (poses) { sk.setPose(posesToCFs(poses, posScale)); mode = 'clip'; return; }
