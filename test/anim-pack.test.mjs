@@ -39,6 +39,8 @@ withRun.setClip('walk', clip(1)); withRun.setClip('run', clip(2));
 withRun.update(0.016, 8, true);
 assert.equal(withRun.state, 'walk');
 withRun.update(0.016, 16, true);
+assert.equal(withRun.state, 'walk'); // 通常速度(16)までは歩行(Robloxの標準Animateと同じ)
+withRun.update(0.016, 20, true);
 assert.equal(withRun.state, 'run');
 
 console.log('anim-pack ok');

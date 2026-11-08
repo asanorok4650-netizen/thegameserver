@@ -100,6 +100,11 @@ export default function GameView({ server, desc, playerName, onExit }) {
         log('info', 'キャラクターを配置中…');
         await tick();
         const built = buildAvatar(descRef.current);
+        // アニメの読み込み結果を画面のログに出す(読み込み完了の時点で、ログを数秒だけ開く)
+        built.onAnimLog = (kind, text) => {
+          log(kind, text);
+          if (!dead && /読み込み結果/.test(text)) { setShowLog(true); setTimeout(() => { if (!dead) setShowLog(false); }, 9000); }
+        };
         game.setAvatar(built);
         log('ok', `キャラクター(${built.rigType})を配置。歩行アニメ対象: ${game.anim.found.length}/4`);
         if (!dead) { setPhase('playing'); setTimeout(() => setShowLog(false), 4000); }

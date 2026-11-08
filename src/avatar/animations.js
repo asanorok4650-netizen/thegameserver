@@ -75,6 +75,7 @@ export async function loadAvatarAnimations(ctl, report, ids = DEFAULT_R15_ANIMS,
     }
     if (ids[state] || packs[state]) log(`${state}: 読み込めないため手続き式で代用`);
   }));
+  log(`読み込み結果: ${ANIM_STATES.filter((s) => ctl.hasClip(s)).join(' / ') || 'なし(すべて手続き式で代用)'}`);
 }
 
 /** 標準アニメだけを読む(アバターのパックを使わない) */

@@ -14,6 +14,18 @@ const LIMBS = {
 };
 const R15_ROOTS = { lArm: 'LeftUpperArm', rArm: 'RightUpperArm', lLeg: 'LeftUpperLeg', rLeg: 'RightUpperLeg' };
 
+const I3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const rotXcf = (a) => ({ pos: [0, 0, 0], rot: [1, 0, 0, 0, Math.cos(a), -Math.sin(a), 0, Math.sin(a), Math.cos(a)] });
+/** 待機のアニメが読み込めないときの代用: 息づかい程度の小さな揺れ(約3秒周期) */
+function idleSway(t) {
+  const b = Math.sin(t * 2.1);
+  return {
+    UpperTorso: { pos: [0, 0.03 * b, 0], rot: I3 },
+    Head: rotXcf(0.04 * b),
+    LeftUpperArm: rotXcf(0.06 * b), RightUpperArm: rotXcf(0.06 * b),
+  };
+}
+
 /** 歩行の位相と振れ幅を進めて、4肢の角度を返す。speed: 水平速度(studs/s) */
 function makeGait() {
   let phase = 0, amp = 0;
@@ -42,16 +54,22 @@ export function makeAnimator(built) {
     const gait = makeGait();
     const ctl = createAnimate();
     const posScale = (built.scales && built.scales.height) || 1;
-    let usedClip = false;
-    // アバターのアニメーションパック(歩行・ラン・ジャンプ…)→標準アニメの順に読み込む。読み込めるまで/読めない状態は手続き式の振りで代用
-    import('../avatar/animations.js').then((m) => m.loadAvatarAnimations(ctl, built.report)).catch((e) => console.info('[anim] 読み込み処理に失敗', e.message));
+    let mode = null, clock = 0;
+    // アバターのアニメーションパック(歩行・ラン・ジャンプ…)→標準アニメの順に読み込む。読み込めるまで/読めない状態は手続き式の振りで代用。
+    // 結果はコンソールと、画面のログ(built.onAnimLog があれば)に出す
+    const log = (msg) => {
+      console.info('[anim]', msg);
+      if (built.onAnimLog) built.onAnimLog(/失敗|代用|なし/.test(msg) ? 'warn' : 'ok', `[アニメ] ${msg}`);
+    };
+    import('../avatar/animations.js').then((m) => m.loadAvatarAnimations(ctl, built.report, undefined, log)).catch((e) => log(`読み込み処理に失敗 - ${e.message}`));
     return {
       found, anim: ctl,
       update(dt, speed, grounded) {
         const poses = ctl.update(dt, speed, grounded);
-        if (poses) { sk.setPose(posesToCFs(poses, posScale)); usedClip = true; return; }
-        if (usedClip) { sk.resetPose(); usedClip = false; }
+        if (poses) { sk.setPose(posesToCFs(poses, posScale)); mode = 'clip'; return; }
         const a = gait(dt, speed, grounded);
+        if (ctl.state === 'idle') { clock += dt; sk.setPose(idleSway(clock)); mode = 'sway'; return; } // 待機のアニメが無いときの代用
+        if (mode !== 'gait') { sk.resetPose(); mode = 'gait'; }
         for (const k of found) sk.swing(R15_ROOTS[k], a[k]);
       }
     };
