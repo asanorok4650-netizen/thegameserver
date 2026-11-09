@@ -52,6 +52,8 @@ function registerBlocks(Blockly) {
     { type: 'rbxl_player_set_jump_power', message0: 'プレイヤー %1 のジャンプ力を %2 にする', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 205 },
     { type: 'rbxl_player_damage', message0: 'プレイヤー %1 に %2 ダメージを与える', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 205 },
     { type: 'rbxl_player_heal', message0: 'プレイヤー %1 を %2 回復する', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_number', name: 'VALUE', check: 'Number' }], previousStatement: null, nextStatement: null, colour: 205 },
+    { type: 'rbxl_player_play_animation', message0: 'プレイヤー %1 でアニメーション %2 を再生する 速度 %3 %4', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_input', name: 'ANIM', text: 'Wave' }, { type: 'field_number', name: 'SPEED', value: 1, min: 0.05, max: 10 }, { type: 'field_dropdown', name: 'LOOP', options: [['アニメの設定どおり', 'default'], ['くり返す', 'loop'], ['1回だけ', 'once']] }], previousStatement: null, nextStatement: null, colour: 205, tooltip: 'rbxlに入っているアニメーション(KeyframeSequence / CurveAnimation / Animation)を、名前で呼んで再生します。R15の自分のプレイヤーが対象です' },
+    { type: 'rbxl_player_stop_animation', message0: 'プレイヤー %1 のアニメーション %2 を止める(空欄ですべて)', args0: [{ type: 'field_input', name: 'PLAYER', text: 'local' }, { type: 'field_input', name: 'ANIM', text: '' }], previousStatement: null, nextStatement: null, colour: 205 },
     { type: 'rbxl_complete', message0: 'ゲームをクリアにする', previousStatement: null, nextStatement: null, colour: 145 },
 
     // Variables. Keep the Phase 1 text-name block for saved-workspace compatibility.
@@ -96,7 +98,7 @@ const toolbox = {
     { kind: 'category', name: 'プレイヤー', colour: '#438bd0', contents: [
       block('rbxl_player_get_number'), block('rbxl_player_is_alive'), block('rbxl_player_set_health'),
       block('rbxl_player_set_position'), block('rbxl_player_set_walk_speed'), block('rbxl_player_set_jump_power'),
-      block('rbxl_player_damage'), block('rbxl_player_heal'), block('rbxl_teleport'), block('rbxl_respawn')
+      block('rbxl_player_damage'), block('rbxl_player_heal'), block('rbxl_player_play_animation'), block('rbxl_player_stop_animation'), block('rbxl_teleport'), block('rbxl_respawn')
     ] },
     { kind: 'category', name: '変数', colour: '#a879ce', custom: 'VARIABLE' },
     { kind: 'category', name: 'データ', colour: '#b18ad5', contents: [
