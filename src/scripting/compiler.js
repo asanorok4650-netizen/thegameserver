@@ -192,6 +192,8 @@ export function compileBlocklyWorkspace(workspace) {
         case 'rbxl_player_set_jump_power': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'jumpPower', value: value(block, 'VALUE', depth) }); break;
         case 'rbxl_player_set_position': out.push({ op: 'playerSet', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), property: 'position', value: { op: 'vector', values: ['X','Y','Z'].map((k) => ({ op: 'number', value: numericField(block, k) })) } }); break;
         case 'rbxl_player_damage': out.push({ op: 'playerDamage', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: value(block, 'VALUE', depth) }); break;
+        case 'rbxl_player_play_animation': out.push({ op: 'playerAnimation', action: 'play', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), animation: String(field(block, 'ANIM', '')).slice(0, 100), speed: { op: 'number', value: numericField(block, 'SPEED', 1) }, loop: ['loop', 'once'].includes(field(block, 'LOOP')) ? field(block, 'LOOP') : 'default' }); break;
+        case 'rbxl_player_stop_animation': out.push({ op: 'playerAnimation', action: 'stop', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), animation: String(field(block, 'ANIM', '')).slice(0, 100), speed: { op: 'number', value: 1 }, loop: 'default' }); break;
         case 'rbxl_player_heal': out.push({ op: 'playerHeal', player: String(field(block, 'PLAYER', 'local')).slice(0, 100), amount: { op: 'number', value: numericField(block, 'VALUE') } }); break;
         case 'rbxl_part_set_size':
         case 'rbxl_part_set_position':
