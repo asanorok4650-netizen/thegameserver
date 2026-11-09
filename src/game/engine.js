@@ -178,7 +178,9 @@ export class Game {
       getPlayerProperty: (player, property) => this.getPlayerProperty(player, property),
       setPlayerProperty: (player, property, value) => this.setPlayerProperty(player, property, value),
       damagePlayer: (player, amount) => this.damagePlayer(player, amount),
-      healPlayer: (player, amount) => this.healPlayer(player, amount)
+      healPlayer: (player, amount) => this.healPlayer(player, amount),
+      playAnimation: (player, name, opts) => this.playPlayerAnimation(player, name, opts),
+      stopAnimation: (player, name) => this.stopPlayerAnimation(player, name)
     });
     this.scriptRuntime.start();
   }
@@ -298,6 +300,17 @@ export class Game {
     if (!this._isRemote(player) || !this.players.damage(player, amount)) return false;
     this._sendStat(player);
     return true;
+  }
+
+  /** スクリプトからのアニメーション再生。いまは自分のプレイヤー(R15)だけ。ほかのプレイヤーは false */
+  playPlayerAnimation(player, name, opts = {}) {
+    if (!this._isLocal(player) || typeof this.anim?.playClip !== 'function') return false;
+    return this.anim.playClip(String(name), opts);
+  }
+
+  stopPlayerAnimation(player, name = '') {
+    if (!this._isLocal(player) || typeof this.anim?.stopClip !== 'function') return false;
+    return this.anim.stopClip(String(name));
   }
 
   healPlayer(player, amount) {
